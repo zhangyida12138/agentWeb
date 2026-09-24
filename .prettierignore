@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+build
+coverage
+.venv
+__pycache__
+.ruff_cache
+.pytest_cache
+.mypy_cache
+
+pnpm-lock.yaml
+uv.lock
+
+# 由工具生成，不参与格式化
+migrations/versions
+*.md

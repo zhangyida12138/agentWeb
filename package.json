@@ -1,0 +1,33 @@
+{
+  "name": "agent-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.3",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "dev": "pnpm --filter frontend dev",
+    "build": "pnpm --filter frontend build",
+    "lint": "pnpm --filter frontend lint",
+    "test": "pnpm --filter frontend test",
+    "typecheck": "pnpm --filter frontend typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs,json,yaml,yml,css,html}": "prettier --write",
+    "*.py": [
+      "uv run --project apps/backend ruff check --fix --force-exclude",
+      "uv run --project apps/backend ruff format --force-exclude"
+    ]
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.6.2"
+  }
+}
