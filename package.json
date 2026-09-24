@@ -11,9 +11,9 @@
     "prepare": "husky",
     "dev": "pnpm --filter frontend dev",
     "build": "pnpm --filter frontend build",
-    "lint": "pnpm --filter frontend lint",
+    "lint": "pnpm -r lint",
     "test": "pnpm --filter frontend test",
-    "typecheck": "pnpm --filter frontend typecheck",
+    "typecheck": "pnpm -r typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

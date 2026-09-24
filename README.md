@@ -95,10 +95,19 @@ agentWeb/
 ├── apps/
 │   ├── backend/          # FastAPI 后端，DDD 分层（详见 apps/backend/README.md）
 │   └── frontend/         # React 前端
+├── packages/
+│   ├── backend/shared/   # Python 共享包 agent-web-shared（工具函数等）
+│   └── frontend/shared/  # 前端共享包 @agent-web/shared（工具函数、hooks 等）
 ├── docker-compose.yml    # PostgreSQL 容器
 ├── Makefile              # 统一命令入口
 └── .husky/pre-commit     # 提交前自动格式化改动文件
 ```
+
+### 共享代码放哪里
+
+- 前端公共代码（工具函数、hooks）放 `packages/frontend/<包名>/src/`，由 `pnpm-workspace.yaml` 的 `packages/frontend/*` 纳入工作区。新增包后运行 `pnpm install`，前端即可直接 `import { useDebouncedValue } from '@agent-web/shared'`（包内 `exports` 直接指向 TS 源码，无需构建）。
+- 后端公共代码放 `packages/backend/<包名>/src/<模块名>/`。新增包后，在 `apps/backend/pyproject.toml` 的 `dependencies` 与 `[tool.uv.sources]` 中声明路径依赖，再 `uv sync --directory apps/backend`，之后即可 `from agent_web_shared import normalize_pagination`。
+- `make lint` / `make format` 已覆盖 `packages/` 下的 TS 与 Python 代码；提交时的 husky 钩子同样会格式化这些文件。
 
 ## 提交前检查
 

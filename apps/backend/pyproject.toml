@@ -5,6 +5,7 @@ description = "AgentWeb backend — FastAPI + DDD + SQLAlchemy(async) + PostgreS
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "agent-web-shared",
     "alembic>=1.14.0",
     "asyncpg>=0.30.0",
     "fastapi>=0.115.0",
@@ -22,6 +23,10 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.9.0",
 ]
+
+# 共享包来自仓库内 packages/backend，以可编辑方式装入当前虚拟环境
+[tool.uv.sources]
+agent-web-shared = { path = "../../packages/backend/shared", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -48,7 +53,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "tests"]
+known-first-party = ["agent_web_shared", "app", "tests"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -37,14 +37,14 @@ dev-frontend:
 	pnpm --filter frontend dev
 
 format:
-	uv run --directory apps/backend ruff format src tests migrations
-	uv run --directory apps/backend ruff check --fix src tests migrations
-	prettier --write .
+	uv run --directory apps/backend ruff format src tests migrations ../../packages/backend
+	uv run --directory apps/backend ruff check --fix src tests migrations ../../packages/backend
+	pnpm exec prettier --write .
 
 lint:
-	uv run --directory apps/backend ruff format --check src tests migrations
-	uv run --directory apps/backend ruff check src tests migrations
-	pnpm --filter frontend lint
+	uv run --directory apps/backend ruff format --check src tests migrations ../../packages/backend
+	uv run --directory apps/backend ruff check src tests migrations ../../packages/backend
+	pnpm lint
 
 test: test-backend test-frontend
 

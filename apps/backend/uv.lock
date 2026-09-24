@@ -7,6 +7,7 @@ name = "agent-web-backend"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agent-web-shared" },
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
@@ -27,6 +28,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-web-shared", editable = "../../packages/backend/shared" },
     { name = "alembic", specifier = ">=1.14.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -44,6 +46,11 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.9.0" },
 ]
+
+[[package]]
+name = "agent-web-shared"
+version = "0.1.0"
+source = { editable = "../../packages/backend/shared" }
 
 [[package]]
 name = "alembic"
