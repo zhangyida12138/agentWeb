@@ -28,6 +28,12 @@ dev = [
 [tool.uv.sources]
 agent-web-shared = { path = "../../packages/backend/shared", editable = true }
 
+# 使用清华 TUNA 镜像源加速 PyPI 依赖下载
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
