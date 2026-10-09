@@ -6,8 +6,8 @@
 help:
 	@echo Available targets:
 	@echo   make install         Install backend (uv) and frontend (pnpm) dependencies
-	@echo   make db-up           Start the PostgreSQL container
-	@echo   make db-down         Stop the PostgreSQL container
+	@echo   make db-up           Start the PostgreSQL and pgAdmin containers
+	@echo   make db-down         Stop the PostgreSQL and pgAdmin containers
 	@echo   make dev             Run backend and frontend dev servers together
 	@echo   make dev-backend     Run only the FastAPI dev server on http://localhost:8000
 	@echo   make dev-frontend    Run only the Vite dev server on http://localhost:5173
@@ -21,7 +21,7 @@ install:
 	pnpm install
 
 db-up:
-	docker compose up -d postgres
+	docker compose up -d postgres pgadmin
 
 db-down:
 	docker compose down
