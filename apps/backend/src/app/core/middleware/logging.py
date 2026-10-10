@@ -7,12 +7,11 @@ from starlette.responses import Response
 
 from app.core.logging import generate_request_id, request_id_var
 
+
 class LoggingMiddleware(BaseHTTPMiddleware):
     """生成 request_id → 写 ContextVar → 打 access/error 日志 → 写 header。"""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = generate_request_id()
         token = request_id_var.set(request_id)
         request.state.request_id = request_id

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any, ClassVar
 
 from sqlalchemy import TIMESTAMP, UUID, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, mapped_column
@@ -16,8 +16,10 @@ NAMING_CONVENTION: dict[str, str] = {
     "pk": "pk_%(table_name)s",
 }
 
+
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
+
 
 # 公共列类型别名，减少样板
 UuidPk = Annotated[
@@ -58,25 +60,29 @@ DeletedAt = Annotated[
     ),
 ]
 
+
 class Base(DeclarativeBase):
     """全局 Declarative 基类（Alembic 的 target_metadata 指向它）。"""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    type_annotation_map = {
+    type_annotation_map: ClassVar[dict[Any, Any]] = {
         datetime: TIMESTAMP(timezone=True),
         uuid.UUID: UUID(as_uuid=True),
     }
+
 
 class IDMixin(MappedAsDataclass):
     """给实体加 UUID 主键。"""
 
     id: Mapped[uuid.UUID] = UuidPk  # type: ignore[assignment]
 
+
 class TimestampMixin(MappedAsDataclass):
     """给实体加创建/更新时间（UTC 时区）。"""
 
     created_at: Mapped[datetime] = CreatedAt  # type: ignore[assignment]
     updated_at: Mapped[datetime] = UpdatedAt  # type: ignore[assignment]
+
 
 class SoftDeleteMixin(MappedAsDataclass):
     """给实体加软删除标记（posts / comments 用）。"""

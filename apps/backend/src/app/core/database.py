@@ -25,6 +25,7 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
 )
 
+
 async def get_db() -> AsyncIterator[AsyncSession]:
     """FastAPI 依赖注入入口——唯一的事务边界。
 
@@ -37,6 +38,6 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             await session.commit()
         except Exception:
             await session.rollback()
-            raise   # 保持异常传播，不能删除
+            raise  # 保持异常传播，不能删除
         finally:
-            await session.close()   # 上下文管理器本身就会close，这里是冗余
+            await session.close()  # 上下文管理器本身就会close，这里是冗余

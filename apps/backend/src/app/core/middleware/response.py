@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
+
 class ResponseWrapperMiddleware(BaseHTTPMiddleware):
     """把非流式 JSON 响应包成统一信封 {code,data,message}。
 
@@ -38,9 +39,7 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
             getattr(app, "swagger_ui_oauth2_redirect_url", None),
         )
         path = request.url.path
-        return any(
-            p and (path == p or path.startswith(f"{p}/")) for p in docs_paths
-        )
+        return any(p and (path == p or path.startswith(f"{p}/")) for p in docs_paths)
 
     @staticmethod
     def _is_already_envelope(payload: object) -> bool:
@@ -56,9 +55,7 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
         """拷贝响应头，去掉指定的 key（大小写不敏感）。"""
         drop_set = {"content-length", *drop}
         return {
-            key: value
-            for key, value in response.headers.items()
-            if key.lower() not in drop_set
+            key: value for key, value in response.headers.items() if key.lower() not in drop_set
         }
 
     @classmethod
@@ -90,9 +87,7 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
             media_type="application/json; charset=utf-8",
         )
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
 
         # --- 快速判定：状态 & header 级标记，不必读 body ---
@@ -125,14 +120,12 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
         try:
             body_chunks = [chunk async for chunk in response.body_iterator]
             raw_body = b"".join(body_chunks)
-        except Exception:  # noqa: BLE001 - 任何读取失败都直接原封不动返回，宁可漏包也不能打断用户
+        except Exception:
             return response
 
         if not raw_body:
             # 空 body（比如 204 No Content），包一层空 data
-            return self._envelope_response(
-                {"code": 0, "data": None, "message": "ok"}, response
-            )
+            return self._envelope_response({"code": 0, "data": None, "message": "ok"}, response)
 
         try:
             payload = json.loads(raw_body)
@@ -142,6 +135,4 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
         if self._is_already_envelope(payload):
             return self._rebuild(response, raw_body)  # 已是信封，原样回吐
 
-        return self._envelope_response(
-            {"code": 0, "data": payload, "message": "ok"}, response
-        )
+        return self._envelope_response({"code": 0, "data": payload, "message": "ok"}, response)

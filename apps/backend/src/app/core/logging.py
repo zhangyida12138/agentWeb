@@ -9,6 +9,7 @@ from loguru import logger
 # 贯穿单次请求的唯一 ID（中间件写入，日志读取）
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
+
 def _format_record(record: dict) -> str:
     """把 request_id 注入日志格式模板（从 ContextVar 读，自动随请求切换）。"""
 
@@ -22,10 +23,12 @@ def _format_record(record: dict) -> str:
         "{exception}\n"
     )
 
+
 def generate_request_id() -> str:
     """生成短 request_id（不带横杠的 hex，header 好看点）。"""
 
     return uuid4().hex
+
 
 def setup_logging(debug: bool = False) -> None:
     """应用启动时调用一次，替换默认 handler。"""

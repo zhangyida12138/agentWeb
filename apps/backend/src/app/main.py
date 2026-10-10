@@ -5,13 +5,13 @@ from fastapi.responses import RedirectResponse
 from loguru import logger
 
 from app.core.config import get_settings
-from app.core.exceptions import register_exception_handlers
+from app.core.exceptions import register_exception_handlers, success_response
 from app.core.logging import setup_logging
 from app.core.middleware import MIDDLEWARES
-from app.core.exceptions import success_response
 from app.presentation.api.v1.router import api_router
 
 settings = get_settings()
+
 
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期：启动初始化 → yield 处理请求 → 关闭清理。"""
@@ -25,6 +25,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     )
     yield  # 所有请求都在 yield 与 finally 之间处理
     logger.info("🛑 App shutdown complete")
+
 
 # 实例化 FastAPI（docs_url 仅在允许时开启）
 app = FastAPI(
@@ -44,6 +45,7 @@ for mw in MIDDLEWARES:
     app.add_middleware(mw.cls, *mw.args, **mw.kwargs)
 
 app.include_router(api_router)
+
 
 # 根路径：开发跳 docs，生产报个信
 @app.get("/", include_in_schema=False, response_model=None)

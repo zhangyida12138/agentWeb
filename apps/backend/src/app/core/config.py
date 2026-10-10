@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class AppSettings(BaseModel):
     """应用元信息。"""
 
@@ -14,6 +15,7 @@ class AppSettings(BaseModel):
     docs_enabled: bool = True
     port: int = 8000
 
+
 class DatabaseSettings(BaseModel):
     """数据库连接与连接池。"""
 
@@ -22,6 +24,7 @@ class DatabaseSettings(BaseModel):
     pool_size: int = 10
     max_overflow: int = 20
     pool_pre_ping: bool = True
+
 
 class SecuritySettings(BaseModel):
     """JWT 与密码哈希。
@@ -36,6 +39,7 @@ class SecuritySettings(BaseModel):
     jwt_expire_minutes: int = 60
     bcrypt_rounds: int = Field(default=12, ge=4, le=20)
 
+
 class CorsSettings(BaseModel):
     """跨域白名单。"""
 
@@ -44,12 +48,14 @@ class CorsSettings(BaseModel):
     allow_methods: list[str] = ["*"]
     allow_headers: list[str] = ["*"]
 
+
 class LLMSettings(BaseModel):
     """P6 Agent 用 LLM 客户端配置（现阶段可留空）。"""
 
     base_url: str | None = None
     api_key: SecretStr | None = None
     model: str | None = None
+
 
 class Settings(BaseSettings):
     """全局配置聚合（pydantic-settings 自动从 .env + 环境变量读取）。
@@ -89,12 +95,12 @@ class Settings(BaseSettings):
     cors: CorsSettings = Field(default_factory=CorsSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
 
-    def model_post_init(self, __context) -> None:  # noqa: ANN001
+    def model_post_init(self, __context) -> None:
         """在 pydantic 完成所有字段加载后做二次校验。"""
 
         if self.security.jwt_secret_key is None:
             if self.app.env in {"staging", "production"}:
-                msg = "SECURITY__JWT_SECRET_KEY 必须在生产/预发环境显式配置（≥32字符）"
+                msg = "SECURITY__JWT_SECRET_KEY 必须在生产/预发环境显式配置，且长度不少于 32 字符"  # noqa: RUF001
                 raise ValueError(msg)
             # development / test 环境允许缺省：自动生成一次性密钥（重启失效，仅用于开发调试）
             import secrets

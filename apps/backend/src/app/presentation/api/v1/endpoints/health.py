@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import UTC
 from datetime import datetime as dt
 
 from fastapi import APIRouter, Depends
@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.exceptions import success_response
 
 router = APIRouter()
+
 
 @router.get("/health", summary="健康检查")
 async def health_check(session: AsyncSession = Depends(get_db)) -> dict:
@@ -29,6 +30,6 @@ async def health_check(session: AsyncSession = Depends(get_db)) -> dict:
                 "docs_enabled": settings.app.docs_enabled,
             },
             "db": "ok",
-            "timestamp": dt.now(timezone.utc).isoformat(),
+            "timestamp": dt.now(UTC).isoformat(),
         }
     )
