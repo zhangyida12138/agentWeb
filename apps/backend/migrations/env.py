@@ -6,22 +6,25 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# from app.core.config import get_settings
+from app.core.config import get_settings
 
-# # 导入全部模型后 Base.metadata 才包含所有表定义（autogenerate 依赖它）
-# from app.infrastructure.persistence import models  # noqa: F401
-# from app.infrastructure.persistence.base import Base
+# 导入全部模型后 Base.metadata 才包含所有表定义（autogenerate 依赖它）
+from app.infrastructure.persistence import models  # noqa: F401
+from app.infrastructure.persistence.base import Base
 
-# config = context.config
+config = context.config
 
-# if config.config_file_name is not None:
-#     fileConfig(config.config_file_name)
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
-# # 数据库地址统一由应用配置提供，只需维护 DATABASE_URL / .env
-# config.set_main_option("sqlalchemy.url", get_settings().database_url)
+_settings = get_settings()
+# 数据库地址统一由应用配置提供，只需维护 DB__URL / .env
+# 注意：离线模式 / autogenerate 需要同步驱动 URL，因此把 asyncpg 替换成 psycopg 风格
+_sync_url = _settings.db.url.replace("postgresql+asyncpg://", "postgresql://")
+config.set_main_option("sqlalchemy.url", _sync_url)
 
-# target_metadata = Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
+
 
 def run_migrations_offline() -> None:
     """离线模式：只生成 SQL，不建立数据库连接。"""
