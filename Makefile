@@ -31,7 +31,7 @@ dev:
 	pnpm exec concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta "$(MAKE) dev-backend" "$(MAKE) dev-frontend"
 
 dev-backend:
-	uv run --directory apps/backend uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uv run --directory apps/backend uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir src
 
 dev-frontend:
 	pnpm --filter frontend dev
