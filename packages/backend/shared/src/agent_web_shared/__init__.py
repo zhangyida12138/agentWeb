@@ -4,5 +4,19 @@
 """
 
 from agent_web_shared.pagination import DEFAULT_LIMIT, MAX_LIMIT, normalize_pagination
+from agent_web_shared.security import (
+    create_access_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
 
-__all__ = ["DEFAULT_LIMIT", "MAX_LIMIT", "normalize_pagination"]
+__all__ = [
+    "DEFAULT_LIMIT",
+    "MAX_LIMIT",
+    "create_access_token",
+    "decode_token",
+    "hash_password",
+    "normalize_pagination",
+    "verify_password",
+]
