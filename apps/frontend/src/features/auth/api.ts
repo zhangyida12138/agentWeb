@@ -14,8 +14,7 @@ import type {
  * 认证接口的唯一入口。
  *
  * 组件里不直接写 fetch 字符串：路径、方法、请求体形状集中在这里，
- * 后端改路径时只改这一个文件（比如改密接口实际是 `/auth/changepassword`，
- * 与 PLAN.md 里写的 `/change-password` 不一致——这种偏差只允许存在于地图上，不允许散落在页面里）。
+ * 后端改路径时只改这一个文件。
  */
 
 export function login(input: LoginInput): Promise<LoginResult> {
@@ -42,7 +41,7 @@ export function updateProfile(input: UpdateProfileInput): Promise<AuthUser> {
 
 /** 后端返回的是 `{code,data:null,message:'密码修改成功'}`，没有需要用的数据。 */
 export function changePassword(input: ChangePasswordInput): Promise<null> {
-  return request<null>('/auth/changepassword', { method: 'POST', body: input })
+  return request<null>('/auth/change-password', { method: 'POST', body: input })
 }
 
 /** Query key 集中定义：避免各处手写字符串导致缓存对不上。 */

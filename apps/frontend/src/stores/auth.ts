@@ -116,6 +116,21 @@ export function clearAuth(): void {
   commit(EMPTY_STATE)
 }
 
+/**
+ * 订阅登录态变化。
+ *
+ * 为什么需要它：登录态变化意味着「换人了」，而 React Query 的缓存是**模块级单例**，
+ * 生命周期比一次会话长得多。不主动作废的话，下一个登录者会直接命中
+ * 上一个身份的 fresh 缓存（权限快照、个人资料都会串）。
+ *
+ * 为什么做成订阅而不是在调用点手动清缓存：会改动 token 的地方有四处
+ * ——登录、主动退出、401 自动登出、跨标签页同步——
+ * 逐一记得补一句清理，是一次注定会漏的约定；订阅把这件事变成结构上的必然。
+ */
+export function subscribeAuth(listener: () => void): () => void {
+  return subscribe(listener)
+}
+
 /** 组件里读登录态。字段引用稳定，不会触发无意义的重复渲染。 */
 export function useAuth(): AuthState {
   return useSyncExternalStore(subscribe, getAuthState, getAuthState)

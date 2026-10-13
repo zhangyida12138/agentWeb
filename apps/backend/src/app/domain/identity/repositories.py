@@ -36,5 +36,18 @@ class UserRepository(ABC):
     async def get_by_username(self, username: Username) -> User | None:
         """按用户名查询（注册查重用）。"""
 
+    @abstractmethod
+    async def list_paged(self, offset: int, limit: int) -> list[User]:
+        """按创建时间倒序取一段用户。
+
+        刻意**不设默认值**：一次取多少条是表现层策略
+        （见 ``agent_web_shared.pagination`` 的 DEFAULT_LIMIT / MAX_LIMIT），
+        domain 只声明「能按偏移取一段」，不规定取多少。
+        """
+
+    @abstractmethod
+    async def count(self) -> int:
+        """用户总数（与 ``list_paged`` 配套，供分页响应回传 total）。"""
+
 
 __all__ = ["UserRepository"]

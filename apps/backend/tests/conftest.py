@@ -24,6 +24,11 @@ import os
 os.environ.setdefault("APP__ENV", "test")
 # bcrypt 12 轮单次约 250ms，注册 + 改密会各算两次；4 轮（配置下限）让测试回到毫秒级
 os.environ.setdefault("SECURITY__BCRYPT_ROUNDS", "4")
+# 引导管理员必须显式关掉，而且是**赋值**不是 setdefault：
+#   只要开发者本机 .env 里配了这个邮箱，「新用户默认是 reader」这类断言
+#   就会莫名其妙地挂掉。空串会被 AppSettings 的校验器解释成「未配置」，
+#   同时因为真实环境变量优先级高于 .env，它能把 .env 里的值盖掉。
+os.environ["APP__BOOTSTRAP_ADMIN_EMAIL"] = ""
 
 from collections.abc import AsyncIterator
 

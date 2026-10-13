@@ -95,6 +95,24 @@ class ChangePasswordCommand:
     new_password: str
 
 
+@dataclass(frozen=True, slots=True)
+class ResetPasswordCommand:
+    """管理员重置他人密码的命令。
+
+    与 ``ChangePasswordCommand`` 的分水岭是**没有** ``old_password``：
+        「改自己的密码」要证明「我是我」，所以必须验旧密码；
+        「管理员帮别人改密码」的授权凭证是调用者已经通过
+        ``user:reset_password`` 权限检查，而目标用户此刻恰恰可能
+        **根本想不起旧密码**——再要一次旧密码，这个功能就没有存在意义了。
+
+    这个差异必须体现在类型上，而不是用 ``old_password: str | None`` 加一个
+    运行期分支去兼容两种场景：那样一来「忘记传旧密码」会被静默当成
+    「管理员重置」，普通用户就能绕过二次确认改掉自己的密码。
+    """
+
+    new_password: str
+
+
 # ──────────────────────────── 出参：DTO ────────────────────────────
 
 
@@ -167,6 +185,7 @@ __all__ = [
     "ChangePasswordCommand",
     "LoginCommand",
     "RegisterCommand",
+    "ResetPasswordCommand",
     "TokenDTO",
     "Unset",
     "UpdateProfileCommand",

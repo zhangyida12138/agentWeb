@@ -18,7 +18,7 @@ import { useChangePasswordMutation } from './hooks'
  * 长度口径与后端 schema 对齐：8~64 个字符。注意后端还有一层 bcrypt 的 72 **字节**
  * 限制——那是汉字才会踩到的坑，由后端的 WeakPasswordError 兜底，前端不重复实现。
  *
- * 放在 features/auth 而不是 profile：它调用的是 `/auth/changepassword`，
+ * 放在 features/auth 而不是 profile：它调用的是 `/auth/change-password`，
  * 属于「认证」这件事，个人中心只是入口之一。
  */
 

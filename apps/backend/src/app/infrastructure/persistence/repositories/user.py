@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import NoReturn
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,11 @@ from app.domain.identity.exceptions import (
 )
 from app.domain.identity.repositories import UserRepository
 from app.domain.identity.value_objects import Email, Username
-from app.infrastructure.persistence.mappers.user import apply_to_model, to_entity, to_model
+from app.infrastructure.persistence.mappers.user import (
+    apply_to_model,
+    to_entity,
+    to_model,
+)
 from app.infrastructure.persistence.models.user import UserModel
 
 # PostgreSQL SQLSTATE：唯一约束冲突（unique_violation）
@@ -108,6 +112,24 @@ class SqlUserRepository(UserRepository):
     async def _one(self, stmt: Select[tuple[UserModel]]) -> User | None:
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         return to_entity(model) if model is not None else None
+
+    async def list_paged(self, offset: int, limit: int) -> list[User]:
+        # 次序键里带上 id：同一批插入的行 created_at 可能完全相同，
+        # 只按 created_at 排序时 PG 不保证稳定顺序，
+        # 表现为「翻页时某行出现两次、另一行永远看不到」
+        stmt = (
+            select(UserModel)
+            .order_by(UserModel.created_at.desc(), UserModel.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        models = (await self._session.execute(stmt)).scalars().all()
+        return [to_entity(model) for model in models]
+
+    async def count(self) -> int:
+        # select(func.count()).select_from(...) 生成 count(*)，不必判空值列
+        stmt = select(func.count()).select_from(UserModel)
+        return (await self._session.execute(stmt)).scalar_one()
 
 
 __all__ = ["PG_UNIQUE_VIOLATION", "SqlUserRepository"]

@@ -56,7 +56,7 @@ describe('ChangePasswordPage', () => {
   it('修改成功后清空输入框并给出提示（明文不留存在 DOM 里）', async () => {
     signIn()
     installFetchMock((url) =>
-      url.endsWith('/auth/changepassword')
+      url.endsWith('/auth/change-password')
         ? { data: null, message: '密码修改成功' }
         : { status: 404, code: 40400, message: '接口不存在' },
     )

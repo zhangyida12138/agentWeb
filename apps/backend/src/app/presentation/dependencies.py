@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import jwt
@@ -24,20 +25,32 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_web_shared.security import decode_token
+from app.application.access.use_cases import (
+    AssignRolesUseCase,
+    GetMyAccessUseCase,
+    ListPermissionsUseCase,
+    ListRolesUseCase,
+    ListUserRolesUseCase,
+    ListUsersUseCase,
+)
 from app.application.identity.use_cases import (
     ChangePasswordUseCase,
     GetCurrentUserUseCase,
     LoginUserUseCase,
     RegisterUserUseCase,
+    ResetUserPasswordUseCase,
     TokenConfig,
     UpdateProfileUseCase,
 )
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.exceptions import InternalServerError
+from app.domain.access.exceptions import PermissionDeniedError
+from app.domain.access.repositories import AccessRepository
 from app.domain.identity.entities import User
 from app.domain.identity.exceptions import TokenInvalidError
 from app.domain.identity.repositories import UserRepository
+from app.infrastructure.persistence.repositories.access import SqlAccessRepository
 from app.infrastructure.persistence.repositories.user import SqlUserRepository
 
 # ──────────────────────────── 配置 ────────────────────────────
@@ -75,14 +88,27 @@ async def get_user_repository(
     return SqlUserRepository(db)
 
 
+async def get_access_repository(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AccessRepository:
+    """同 ``get_user_repository``：对外只暴露接口类型。"""
+    return SqlAccessRepository(db)
+
+
 # ──────────────────────────── 用例工厂 ────────────────────────────
 
 
 async def get_register_use_case(
     users: Annotated[UserRepository, Depends(get_user_repository)],
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
 ) -> RegisterUserUseCase:
     # bcrypt 轮数从配置取：生产 12 轮，测试环境调低可以把注册类用例从秒级压到毫秒级
-    return RegisterUserUseCase(users, bcrypt_rounds=get_settings().security.bcrypt_rounds)
+    return RegisterUserUseCase(
+        users,
+        access,
+        bcrypt_rounds=get_settings().security.bcrypt_rounds,
+        bootstrap_admin_email=get_settings().app.bootstrap_admin_email,
+    )
 
 
 async def get_login_use_case(
@@ -107,6 +133,57 @@ async def get_change_password_use_case(
     users: Annotated[UserRepository, Depends(get_user_repository)],
 ) -> ChangePasswordUseCase:
     return ChangePasswordUseCase(users, bcrypt_rounds=get_settings().security.bcrypt_rounds)
+
+
+async def get_list_roles_use_case(
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> ListRolesUseCase:
+    return ListRolesUseCase(access)
+
+
+async def get_list_permissions_use_case(
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> ListPermissionsUseCase:
+    return ListPermissionsUseCase(access)
+
+
+async def get_list_users_use_case(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> ListUsersUseCase:
+    return ListUsersUseCase(users, access)
+
+
+async def get_list_user_roles_use_case(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> ListUserRolesUseCase:
+    return ListUserRolesUseCase(users, access)
+
+
+async def get_assign_roles_use_case(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> AssignRolesUseCase:
+    return AssignRolesUseCase(users, access)
+
+
+async def get_reset_user_password_use_case(
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+) -> ResetUserPasswordUseCase:
+    """管理员重置密码的用例工厂。
+
+    它**不**接收调用者身份：授权是表现层 ``require_permission`` 的职责，
+    把「谁在调」传进用例会让应用层长出第二套权限判断，
+    将来换入口（CLI、定时任务）就得复制一遍。
+    """
+    return ResetUserPasswordUseCase(users, bcrypt_rounds=get_settings().security.bcrypt_rounds)
+
+
+async def get_my_access_use_case(
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> GetMyAccessUseCase:
+    return GetMyAccessUseCase(access)
 
 
 # ──────────────────────────── 认证守卫 ────────────────────────────
@@ -164,18 +241,73 @@ async def get_current_user(
 
 
 # 受保护接口的标注糖：`current_user: CurrentUser` 一行挂上认证+禁用检查。
-# 后续 P3 的 require_permission 守卫会在此基础上再叠一层授权判断。
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_permission(code: str) -> Callable[..., Awaitable[User]]:
+    """生成「要求当前用户拥有 ``code`` 权限」的依赖。
+
+    这是**工厂**而不是普通依赖：授权判断需要一个「要什么权限」的参数，
+    而 FastAPI 的 ``Depends`` 无法给被依赖的函数传业务参数，
+    于是把参数留在外层、把依赖函数闭包出来。
+
+    用法（放在路由装饰器的 ``dependencies`` 里，不关心当前用户时）::
+
+        @router.get("/users", dependencies=[Depends(require_permission(code))])
+
+    需要拿到当前用户时，直接当参数注解用::
+
+        current_user: Annotated[User, Depends(require_permission(code))]
+
+    ``code`` 一律从 ``domain/access/entities.py`` 的 ``PermissionCode`` 取，
+    不要写字面量：写错一个字母不会报错，只会让接口永远 403。
+
+    「守卫在依赖层，不在用例层」是刻意的：这样「这个接口需要什么权限」
+    和接口定义挨在一起，一眼能看全；用例则保持与 HTTP 无关，可被任意调用方复用。
+    """
+    # 权限码在「创建依赖」时就固定下来，避免请求期再取一次
+    required = code
+
+    async def _guard(
+        current_user: CurrentUser,
+        access: Annotated[AccessRepository, Depends(get_access_repository)],
+    ) -> User:
+        user_id = current_user.id
+        if user_id is None:  # pragma: no cover - 守卫出来的实体必然来自仓储，id 不会为空
+            raise TokenInvalidError()
+
+        # 每次请求现查一次权限，而不是塞进 token：token 里带权限的确能省一次查询，
+        # 但撤权要等到 token 过期才生效——「刚把某人降级、他还能用十分钟」
+        # 对管理接口来说是不可接受的。这里用一次查询换掉这个窗口。
+        owned = await access.get_permission_codes(user_id)
+        if required not in owned:
+            raise PermissionDeniedError(required)
+        return current_user
+
+    return _guard
+
+
+# 认证（401）与授权（403）分属两个异常，异常处理器据此映射状态码。
+# 这里不做「已登录就一定有权限」之类的兜底——默认拒绝，漏挂守卫的接口会 401 而不是放行。
 
 
 __all__ = [
     "CurrentUser",
+    "get_access_repository",
+    "get_assign_roles_use_case",
     "get_change_password_use_case",
     "get_current_user",
     "get_current_user_use_case",
+    "get_list_permissions_use_case",
+    "get_list_roles_use_case",
+    "get_list_user_roles_use_case",
+    "get_list_users_use_case",
     "get_login_use_case",
+    "get_my_access_use_case",
     "get_register_use_case",
+    "get_reset_user_password_use_case",
     "get_token_config",
     "get_update_profile_use_case",
     "get_user_repository",
+    "require_permission",
 ]

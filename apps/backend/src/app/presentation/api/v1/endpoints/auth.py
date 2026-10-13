@@ -14,6 +14,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.application.access.use_cases import GetMyAccessUseCase
 from app.application.identity.dto import (
     ChangePasswordCommand,
     LoginCommand,
@@ -28,6 +29,7 @@ from app.application.identity.use_cases import (
     UpdateProfileUseCase,
 )
 from app.core.exceptions import success_response
+from app.presentation.api.v1.schemas.access import AccessSummaryResponse
 from app.presentation.api.v1.schemas.auth import (
     AuthResponse,
     ChangePasswordRequest,
@@ -41,6 +43,7 @@ from app.presentation.dependencies import (
     get_change_password_use_case,
     get_current_user_use_case,
     get_login_use_case,
+    get_my_access_use_case,
     get_register_use_case,
     get_update_profile_use_case,
 )
@@ -101,6 +104,33 @@ async def get_me(
     return UserResponse.model_validate(await use_case.execute(current_user.id))
 
 
+@router.get(
+    "/me/access",
+    response_model=AccessSummaryResponse,
+    summary="当前用户的角色与权限",
+)
+async def get_my_access(
+    current_user: CurrentUser,
+    use_case: Annotated[GetMyAccessUseCase, Depends(get_my_access_use_case)],
+) -> AccessSummaryResponse:
+    """读取当前登录用户的角色码与权限码并集，供前端渲染管理入口。
+
+    为什么把角色/权限**单独**开一个端点，而不是并进 ``/auth/me``：
+        ① ``UserResponse`` 是注册、登录、改资料三处共用的用户视图。往里加角色，
+           identity 上下文就被迫去依赖 access 上下文的角色表——而 access 本来
+           是依赖 identity 的（要查用户），两个方向一串就成了循环依赖。
+        ② 登录页根本不需要权限，让它白拿一份角色数据没有意义。
+        ③ 权限会变（管理员刚给你加了角色）。独立端点能被单独失效/重取，
+           而 ``auth/me`` 的缓存有效期通常更长。
+
+    前端拿它做「显不显示按钮」的判断，用它跟后端守卫对齐：
+        判断依据是 ``permission_codes`` 里有没有某个权限码，
+        不是「role_codes 里有没有 admin」。角色名是给人看的，
+        权限码才是接口真正校验的东西。
+    """
+    return AccessSummaryResponse.model_validate(await use_case.execute(current_user.id))
+
+
 @router.patch("/me", response_model=UserResponse, summary="修改资料")
 async def update_me(
     payload: UpdateProfileRequest,
@@ -118,7 +148,7 @@ async def update_me(
     return UserResponse.model_validate(await use_case.execute(current_user.id, command))
 
 
-@router.post("/changepassword", summary="修改密码")
+@router.post("/change-password", summary="修改密码")
 async def change_password(
     payload: ChangePasswordRequest,
     current_user: CurrentUser,

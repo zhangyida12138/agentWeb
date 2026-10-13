@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers, success_response
 from app.core.logging import setup_logging
 from app.core.middleware import MIDDLEWARES
+from app.core.seed import seed_access_catalog
 from app.presentation.api.v1.router import api_router
 
 settings = get_settings()
@@ -23,6 +24,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         env=settings.app.env,
         debug=settings.app.debug,
     )
+    # 幂等同步角色 / 权限：保证请求进来时权限矩阵已就绪
+    await seed_access_catalog()
     yield  # 所有请求都在 yield 与 finally 之间处理
     logger.info("🛑 App shutdown complete")
 

@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, EmailStr, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,29 @@ class AppSettings(BaseModel):
     debug: bool = False
     docs_enabled: bool = True
     port: int = 8000
+    # 首个管理员的引导邮箱（环境变量 APP__BOOTSTRAP_ADMIN_EMAIL）。
+    #
+    # 解决的是「鸡生蛋」：没有 admin 就没人能进管理接口，也就没人能把自己提成 admin。
+    # 这里指定一个邮箱，用该邮箱注册时直接授予 admin 而不是默认的 reader。
+    #
+    # 只在「注册」这一个时刻生效——已存在的账号不会被事后提权。所以它是一次性引导手段，
+    # 不是常驻的提权后门：上线后应当把这个值清空（或换成一个不会有人去注册的邮箱）。
+    # 用 EmailStr 而不是 str：写错一个字母就静默不生效，是最难查的那类问题，
+    # 宁可在启动时就因为格式非法直接报错。
+    bootstrap_admin_email: EmailStr | None = None
+
+    @field_validator("bootstrap_admin_email", mode="before")
+    @classmethod
+    def _blank_email_means_disabled(cls, value: object) -> object:
+        """空串等价于「没配」。
+
+        运维在 .env 里留一行 ``APP__BOOTSTRAP_ADMIN_EMAIL=``（值空着）来表示关闭，
+        比删掉整行更常见、更不容易漏。不特判的话空串会进 EmailStr 校验，
+        最后以一条「不是合法邮箱」的启动报错收场——排查方向会被彻底带偏。
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class DatabaseSettings(BaseModel):
@@ -62,6 +85,7 @@ class Settings(BaseSettings):
 
     字段匹配规则（ env_nested_delimiter="__" ）：
         APP__NAME         → app.name
+        APP__BOOTSTRAP_ADMIN_EMAIL → app.bootstrap_admin_email
         DB__URL           → db.url
         SECURITY__JWT_*   → security.jwt_*
         CORS__ALLOW_*     → cors.allow_*

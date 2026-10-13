@@ -26,3 +26,51 @@ body {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
 }
+
+/* ──────────────────────────── 滚动条 ──────────────────────────── */
+
+/*
+ * 隐藏滚动条，但**只隐藏「显示」、保留「滚动能力」**。
+ *
+ * 目标只是去掉视觉噪音：Windows 上那条常驻的灰色槽在浅色页面里非常扎眼，
+ * 而它传达的信息（「这里能滚」）在这个布局里几乎总是多余的——页脚没有内容，
+ * 主区是一路向下的卡片流，滚动是唯一出路。
+ *
+ * 隐藏滚动条不影响任何操作方式：滚轮、触控板、键盘（空格 / PageUp / PageDown /
+ * 方向键 / Home / End）以及 `scrollIntoView` 之类的程序化滚动全部照常。
+ * 唯一真正失去的是「右侧还有内容」这个视觉提示，所以这条规则只在
+ * ① 页面级（内容显然会延伸到底）② 明确可横滑的表格 这两种场景下使用，
+ * 不要套到「内容可能被截断且用户无从察觉」的容器上。
+ *
+ * 为什么写在 index.css 而不是做成 UnoCSS 工具类：`::-webkit-scrollbar` 是伪元素选择器，
+ * 用工具类表达需要自定义 utility；而这里总共两条规则、也不需要响应式变体，
+ * 直接写 CSS 更好读，也少一层「这个类到底有没有被生成出来」的不确定性。
+ *
+ * 三条声明缺一不可：`scrollbar-width` 管 Firefox，`-ms-overflow-style` 管旧版
+ * Edge/IE（写在新版里是惰性的，留着只为兼容），`::-webkit-scrollbar` 管
+ * Chrome / Safari / 新版 Edge。只写 WebKit 那一条的话，Firefox 用户仍会看到滚动条。
+ */
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * 内部滚动容器用的版本，用法：`<div class="overflow-x-auto no-scrollbar">`。
+ *
+ * 作用域是元素而不是视口，所以两个场景可以分别取舍。
+ * 这里不加 `!important`：本文件在 main.tsx 里排在 `virtual:uno.css` **之后**导入，
+ * 同优先级下后者会被覆盖——顺序本身就是这里的约束，改动导入顺序会让这条失效。
+ */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

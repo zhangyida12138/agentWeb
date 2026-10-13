@@ -14,17 +14,24 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from agent_web_shared.security import create_access_token, hash_password, verify_password
+from agent_web_shared.security import (
+    create_access_token,
+    hash_password,
+    verify_password,
+)
 from app.application.identity.dto import (
     AuthResultDTO,
     ChangePasswordCommand,
     LoginCommand,
     RegisterCommand,
+    ResetPasswordCommand,
     TokenDTO,
     Unset,
     UpdateProfileCommand,
     UserDTO,
 )
+from app.domain.access.entities import RoleCode
+from app.domain.access.repositories import AccessRepository
 from app.domain.identity.entities import User
 from app.domain.identity.exceptions import (
     EmailAlreadyRegisteredError,
@@ -93,12 +100,30 @@ async def _load(users: UserRepository, user_id: uuid.UUID) -> User:
 
 
 class RegisterUserUseCase:
-    """注册：查重 → 哈希密码 → 建实体 → 落库。"""
+    """注册：查重 → 哈希密码 → 建实体 → 落库 → 授予初始角色。"""
 
-    def __init__(self, users: UserRepository, *, bcrypt_rounds: int = 12) -> None:
+    def __init__(
+        self,
+        users: UserRepository,
+        access: AccessRepository,
+        *,
+        bcrypt_rounds: int = 12,
+        bootstrap_admin_email: str | None = None,
+    ) -> None:
         self._users = users
         # 可注入的算力开关：生产用 12 轮，测试可以调到 4 轮把单测从秒级压到毫秒级
         self._bcrypt_rounds = bcrypt_rounds
+        # 跨上下文协作：注册成功后要挂角色，所以这里也依赖 access。
+        # 依赖依旧只是**抽象**（依赖倒置没破），用例照样能被内存假仓储驱动。
+        self._access = access
+        # 归一化后再比较：Email 值对象会把整个邮箱转小写，而 pydantic 的 EmailStr
+        # 只保证**域名**小写、局部部分原样保留。不统一口径的话，
+        # 配 Admin@Example.com 就永远匹配不上 admin@example.com。
+        # strip 同理：.env 里行尾多一个空格是最常见的手滑，
+        # 而它造成的后果是「引导管理员悄悄失效」，必须顺手抹掉。
+        self._bootstrap_admin_email = (
+            bootstrap_admin_email.strip().lower() if bootstrap_admin_email else None
+        )
 
     async def execute(self, command: RegisterCommand) -> UserDTO:
         # ── 第一步：把原始字符串升格成值对象 ──
@@ -130,7 +155,24 @@ class RegisterUserUseCase:
 
         # ── 第四步：落库（仓储内部会 flush，唯一约束冲突在这里就会抛出来）──
         created = await self._users.add(user)
+
+        # ── 第五步：授予初始角色 ──
+        # 必须在 add() 之后：角色绑定需要用户的 id，而 id 由 User.register 生成、
+        # 借 add() 写进库。这一步与上一步共用同一个事务——角色分配失败会把用户一起
+        # 回滚掉，绝不会留下「有账号但一条权限都没有」的半成品。
+        await self._access.assign_roles(_require_id(created), {self._role_for(email)})
         return UserDTO.from_entity(created)
+
+    def _role_for(self, email: Email) -> str:
+        """决定新用户的初始角色编码。
+
+        单独抽成方法而不是写在 execute 里：这是一条**策略**，
+        「引导邮箱 → admin，其余 → reader」以后可能变（比如改成邀请码机制），
+        届时只改这一处，execute 的流程不受影响。
+        """
+        if self._bootstrap_admin_email is not None and email.value == self._bootstrap_admin_email:
+            return RoleCode.ADMIN
+        return RoleCode.READER
 
 
 # ──────────────────────────── 登录 ────────────────────────────
@@ -251,11 +293,44 @@ class ChangePasswordUseCase:
         await self._users.update(user)
 
 
+# ──────────────────────────── 管理员重置密码 ────────────────────────────
+
+
+class ResetUserPasswordUseCase:
+    """管理员重置指定用户的密码：直接换新哈希，不校验旧密码。
+
+    「谁能调用它」完全由表现层的 ``require_permission(USER_RESET_PASSWORD)`` 决定，
+    用例自己不判断调用者是谁——这是分层的结果：
+        授权是「这次请求允不允许」的问题，属于表现层；
+        用例只回答「给定一个用户和一份新密码，怎么改」。
+    好处是这个用例可以被「批量重置」「命令行重置」等任何入口复用，
+    而不必在每个入口重写一遍「你是不是管理员」。
+
+    ⚠️ 副作用提示：改密**不会**让已签发的 access token 立即失效。
+    本项目的 token 是无状态 JWT，服务端不留会话，因此「重置后把别人踢下线」
+    需要一张吊销名单（或把密码哈希掺进签名），当前不在范围内。
+    前端的弹窗里必须把这一点明确告诉管理员，否则他会以为重置等于踢人。
+    """
+
+    def __init__(self, users: UserRepository, *, bcrypt_rounds: int = 12) -> None:
+        self._users = users
+        self._bcrypt_rounds = bcrypt_rounds
+
+    async def execute(self, user_id: uuid.UUID, command: ResetPasswordCommand) -> UserDTO:
+        # 复用 _load：目标用户不存在时抛 UserNotFoundError（404），
+        # 与「分配角色给不存在的人」表现一致，前端不必分辨两种 404
+        user = await _load(self._users, user_id)
+        user.change_password(_hash_password(command.new_password, rounds=self._bcrypt_rounds))
+        await self._users.update(user)
+        return UserDTO.from_entity(user)
+
+
 __all__ = [
     "ChangePasswordUseCase",
     "GetCurrentUserUseCase",
     "LoginUserUseCase",
     "RegisterUserUseCase",
+    "ResetUserPasswordUseCase",
     "TokenConfig",
     "UpdateProfileUseCase",
 ]
