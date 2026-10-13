@@ -16,7 +16,7 @@ dependencies = [
     "openai>=1.50.0",
     "pydantic[email]>=2.10.0",
     "pydantic-settings>=2.7.0",
-    "python-jose[cryptography]>=3.3.0",
+    "pyjwt>=2.10.0",
     "python-multipart>=0.0.12",
     "sqlalchemy[asyncio]>=2.0.36",
     "uvicorn[standard]>=0.34.0",
@@ -62,6 +62,8 @@ ignore = [
   "RUF002",
   # 中文注释中的全角标点（：，（））是有意为之，不视为 ambiguous
   "RUF003",
+  # 中文提示文案 / 异常消息中的全角标点（：，（））同理，不视为 ambiguous
+  "RUF001",
 ]
 
 [tool.ruff.lint.isort]

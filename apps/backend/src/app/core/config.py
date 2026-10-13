@@ -100,7 +100,7 @@ class Settings(BaseSettings):
 
         if self.security.jwt_secret_key is None:
             if self.app.env in {"staging", "production"}:
-                msg = "SECURITY__JWT_SECRET_KEY 必须在生产/预发环境显式配置，且长度不少于 32 字符"  # noqa: RUF001
+                msg = "SECURITY__JWT_SECRET_KEY 必须在生产/预发环境显式配置，且长度不少于 32 字符"
                 raise ValueError(msg)
             # development / test 环境允许缺省：自动生成一次性密钥（重启失效，仅用于开发调试）
             import secrets

@@ -26,15 +26,21 @@ db-up:
 db-down:
 	docker compose down
 
+# 直接复用下面两条命令字符串，避免嵌套调用 $(MAKE)：
+# Windows 上 make 的完整路径可能含空格（如 "C:/Program Files (x86)/GnuWin32/bin/make"），
+# 嵌进 concurrently 的命令串后会被 cmd.exe 误拆，导致 "'C:/Program' is not recognized"。
+BACKEND_DEV_CMD := uv run --directory apps/backend uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir src
+FRONTEND_DEV_CMD := pnpm --filter frontend dev
+
 # 前后端共用一条命令启动；任一进程退出即同时关闭另一方（Ctrl+C 一并退出）
 dev:
-	pnpm exec concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta "$(MAKE) dev-backend" "$(MAKE) dev-frontend"
+	pnpm exec concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta "$(BACKEND_DEV_CMD)" "$(FRONTEND_DEV_CMD)"
 
 dev-backend:
-	uv run --directory apps/backend uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir src
+	$(BACKEND_DEV_CMD)
 
 dev-frontend:
-	pnpm --filter frontend dev
+	$(FRONTEND_DEV_CMD)
 
 format:
 	uv run --directory apps/backend ruff format src tests migrations ../../packages/backend

@@ -34,9 +34,7 @@ class DomainError(Exception):
         self.message = message
         self.data = data or {}
         # 允许显式指定 HTTP 状态；否则从 code 的前 3 位推导（40900 → 409）
-        self.http_status = http_status or (
-            code // 100 if _CODE_MIN <= code < _CODE_MAX else 500
-        )
+        self.http_status = http_status or (code // 100 if _CODE_MIN <= code < _CODE_MAX else 500)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(code={self.code}, message={self.message!r})"

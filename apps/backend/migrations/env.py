@@ -19,9 +19,9 @@ if config.config_file_name is not None:
 
 _settings = get_settings()
 # 数据库地址统一由应用配置提供，只需维护 DB__URL / .env
-# 注意：离线模式 / autogenerate 需要同步驱动 URL，因此把 asyncpg 替换成 psycopg 风格
-_sync_url = _settings.db.url.replace("postgresql+asyncpg://", "postgresql://")
-config.set_main_option("sqlalchemy.url", _sync_url)
+# 这里直接沿用 asyncpg 的异步 URL：在线迁移本来就是 async_engine_from_config，
+# 离线模式（只渲染 SQL）也不需要真连库，没必要为此多引一个同步驱动依赖。
+config.set_main_option("sqlalchemy.url", _settings.db.url)
 
 target_metadata = Base.metadata
 

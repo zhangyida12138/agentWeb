@@ -1,0 +1,28 @@
+/* 全局基础样式：工具类交给 UnoCSS，这里只放无法用工具类表达的东西 */
+
+:root {
+  /* 品牌色与 uno.config.ts 的 theme.colors.brand 保持一致 */
+  --brand: #aa3bff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #f7f7f9;
+  color: #1f2937;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 表单控件的 focus 描边统一交给工具类控制，浏览器默认描边会和 UnoCSS 打架 */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
