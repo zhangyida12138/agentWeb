@@ -74,6 +74,10 @@ class _FakeUsers(UserRepository):
     async def get_by_id(self, user_id: UUID) -> User | None:
         return self._store.get(user_id)
 
+    async def get_by_ids(self, user_ids: Sequence[UUID]) -> dict[UUID, User]:
+        # 与真实仓储同一契约：缺失的 id 不出现在返回值里
+        return {uid: self._store[uid] for uid in user_ids if uid in self._store}
+
     async def update(self, user: User) -> User:
         self.updated.append(user)
         return user

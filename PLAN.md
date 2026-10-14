@@ -204,14 +204,18 @@ apps/frontend/src/
 
 ### P5 · 评论与点赞（M5）
 
+> ✅ **已完成**（落地细节与两处对下表的修正见 [NEXT.md §6.5](./NEXT.md)）：
+> 评论树是**任意深度**（没有「嵌套层级限制」），`parent_id` 存真实被回复的那条评论、不做归一；
+> 作者名由后端批量解析随响应下发，前端不查 `/users/{id}`。
+
 | # | 任务 | 产出文件 | 验收标准 |
 | --- | --- | --- | --- |
-| 5.1 | 领域：Comment/Like 规则 | `domain/interaction/{entities,repositories,exceptions}.py` | 嵌套层级限制；点赞幂等 |
+| 5.1 | 领域：Comment/Like 规则 | `domain/interaction/{entities,repositories,exceptions}.py` | 父链无环（任意深度）；点赞幂等 |
 | 5.2 | 基础设施：模型/仓储 | `infrastructure/persistence/{models/comment.py,models/like.py,repositories/interaction.py}` | `unique(user_id,target_type,target_id)` |
-| 5.3 | 应用：用例 | `application/interaction/use_cases.py` | 发表/删除评论；评论树组装；ToggleLike；计数 |
-| 5.4 | 表现层：路由 | `presentation/api/v1/endpoints/{comments.py,likes.py}` | 评论树返回；点赞返回最新计数 |
+| 5.3 | 应用：用例 | `application/interaction/use_cases.py` | 发表/删除评论；评论树组装（递归到任意层）；ToggleLike；实时计数 |
+| 5.4 | 表现层：路由 | `presentation/api/v1/endpoints/{comments.py,likes.py}` | 评论树返回（带作者显示名）；点赞返回最新计数 |
 | 5.5 | 迁移 | `migrations/versions/xxxx_interaction.py` | 建出 comments/likes |
-| 5.6 | 测试 | `tests/integration/test_interaction_api.py` | 重复点赞不重复计数；回复归属正确 |
+| 5.6 | 测试 | `tests/integration/test_interaction_api.py` | 重复点赞不重复计数；**回复的父节点被原样保留**（回复一条回复仍是第三层）；缩进层级由前端决定 |
 
 ### P6 · AI Agent（M6）
 

@@ -39,8 +39,11 @@ make install          # uv sync
 make dev              # http://localhost:8000/docs
 make format           # ruff check --fix + ruff format
 make lint             # ruff check + ruff format --check
-make test             # pytest
+make test             # 启动测试库 + pytest
 make coverage         # 带覆盖率
+
+make db-test-up       # 启动测试库容器（5433 / agent_web_test）
+make db-test-down     # 停掉测试库容器
 
 make migrate                       # alembic upgrade head
 make revision m="add xxx table"    # 生成自动迁移
@@ -57,7 +60,42 @@ make downgrade                     # 回退一个版本
 
 ## 测试
 
-- `tests/unit/`：纯领域/应用层测试，用 `tests/fakes.py` 的内存仓储，不需要数据库。
-- `tests/integration/`：HTTP 接口测试，通过 `dependency_overrides` 替换仓储。
+### 三层测试
 
-两层测试都不依赖真实的 PostgreSQL，可直接在 CI 中运行。
+- `tests/unit/`：纯领域 / 应用层逻辑，用内存仓储，不连库、毫秒级。
+  它不依赖 `prepared_test_database`，所以单跑 `uv run pytest tests/unit` 连 Docker 都不用起。
+- `tests/integration/`：真实 PostgreSQL + `ASGITransport`，验证仓储、事务、约束、HTTP 契约。
+- 集成测试不 mock 数据库：本项目最容易出事的地方（升到唯一索引、flush vs commit 的报错时机、
+  递归查询）恰恰只有真库才暴露。
+
+### 独立测试库（不会碰开发数据）
+
+测试连的是 `docker-compose.yml` 里的 **`postgres-test`**：独立容器、独立数据卷，
+端口 **5433**、库名 **agent_web_test**，与开发库（5432 / agent_web）物理隔离。
+
+```bash
+make db-test-up      # = docker compose up -d --wait postgres-test
+uv run pytest        # 不需要再准备什么
+```
+
+`make test` 已经带上了 `db-test-up`；就算你直接 `uv run pytest`，也可以：
+
+1. **会话开始**（`tests/conftest.py::prepared_test_database`，`db_engine` 的依赖）
+   自动完成三件事：核对库名必须以 `_test` 结尾 → 等库可连 → `alembic upgrade head`。
+   用 Alembic 而不是 `create_all`，所以「模型改了但没写迁移」在测试里就能看见。
+2. 每个用例跑在一个**最终回滚的外层事务**里（`join_transaction_mode="create_savepoint"`），
+   所以用例之间互不污染，也不需要清库或按顺序执行。
+
+库名核对是一道防呆：连错库的症状不是报错，而是「测试全绿 + 开发数据被改掉」。
+库没起来时也不需要猜：约 30 秒内会抛 `RuntimeError`，直接告诉你先跑 `make db-test-up`。
+
+### 环境变量在 `.env.test`
+
+> 所有测试相关的环境变量都在 **`apps/backend/.env.test`**（模板：`.env.test.example`），
+> 不写在命令行里，也不写在 `conftest.py` 里。
+
+- 加载规则：`APP__ENV=test` 时依次读 `.env` → `.env.test`，**后者覆盖前者**。
+  所以 `.env.test` 只需写「测试与开发不同」的项，其余沿用 `.env` 或字段默认值。
+- `pytest` 会在 `import app.*` 之前把 `APP__ENV` **钉死**成 `test`，
+  因此不会出现「外部环境变量把测试带去开发库」的情况。
+- `.env.test` 不含机密（它指向本机就够），可以提交进仓库；被忽略的是 `.env`。

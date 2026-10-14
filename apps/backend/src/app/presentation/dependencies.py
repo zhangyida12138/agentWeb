@@ -33,6 +33,16 @@ from app.application.access.use_cases import (
     ListUserRolesUseCase,
     ListUsersUseCase,
 )
+from app.application.blog.use_cases import (
+    CreatePostUseCase,
+    DeletePostUseCase,
+    GetPostBySlugUseCase,
+    ListMyPostsUseCase,
+    ListPublishedPostsUseCase,
+    PublishPostUseCase,
+    UnpublishPostUseCase,
+    UpdatePostUseCase,
+)
 from app.application.identity.use_cases import (
     ChangePasswordUseCase,
     GetCurrentUserUseCase,
@@ -42,15 +52,29 @@ from app.application.identity.use_cases import (
     TokenConfig,
     UpdateProfileUseCase,
 )
+from app.application.interaction.use_cases import (
+    CreateCommentUseCase,
+    DeleteCommentUseCase,
+    GetPostInteractionStatsUseCase,
+    ListCommentsUseCase,
+    ToggleLikeUseCase,
+)
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.exceptions import InternalServerError
 from app.domain.access.exceptions import PermissionDeniedError
 from app.domain.access.repositories import AccessRepository
+from app.domain.blog.repositories import PostRepository
 from app.domain.identity.entities import User
 from app.domain.identity.exceptions import TokenInvalidError
 from app.domain.identity.repositories import UserRepository
+from app.domain.interaction.repositories import CommentRepository, LikeRepository
 from app.infrastructure.persistence.repositories.access import SqlAccessRepository
+from app.infrastructure.persistence.repositories.interaction import (
+    SqlCommentRepository,
+    SqlLikeRepository,
+)
+from app.infrastructure.persistence.repositories.post import SqlPostRepository
 from app.infrastructure.persistence.repositories.user import SqlUserRepository
 
 # ──────────────────────────── 配置 ────────────────────────────
@@ -93,6 +117,35 @@ async def get_access_repository(
 ) -> AccessRepository:
     """同 ``get_user_repository``：对外只暴露接口类型。"""
     return SqlAccessRepository(db)
+
+
+async def get_post_repository(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PostRepository:
+    """同 ``get_user_repository``：对外只暴露接口类型。
+
+    注意三个仓储共用**同一个** ``get_db`` 提供的 session，因此也在同一个事务里：
+    「创建文章 + 关联标签」这种跨表写入失败时会一起回滚，不需要用例操心。
+    """
+    return SqlPostRepository(db)
+
+
+async def get_comment_repository(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CommentRepository:
+    """评论仓储（对外只暴露接口类型）。"""
+    return SqlCommentRepository(db)
+
+
+async def get_like_repository(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> LikeRepository:
+    """点赞仓储（对外只暴露接口类型）。
+
+    点赞与评论共用同一个 session：``POST /likes/toggle`` 里「确认目标存在
+    然后点赞」必须在一个事务里，否则目标可能在两步之间被删掉。
+    """
+    return SqlLikeRepository(db)
 
 
 # ──────────────────────────── 用例工厂 ────────────────────────────
@@ -186,6 +239,120 @@ async def get_my_access_use_case(
     return GetMyAccessUseCase(access)
 
 
+# ────────────────────── 博客上下文的用例工厂 ──────────────────────
+
+
+async def get_list_published_posts_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> ListPublishedPostsUseCase:
+    return ListPublishedPostsUseCase(posts)
+
+
+async def get_post_by_slug_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> GetPostBySlugUseCase:
+    return GetPostBySlugUseCase(posts)
+
+
+async def get_list_my_posts_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> ListMyPostsUseCase:
+    return ListMyPostsUseCase(posts)
+
+
+async def get_create_post_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> CreatePostUseCase:
+    return CreatePostUseCase(posts)
+
+
+async def get_update_post_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> UpdatePostUseCase:
+    return UpdatePostUseCase(posts)
+
+
+async def get_publish_post_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> PublishPostUseCase:
+    return PublishPostUseCase(posts)
+
+
+async def get_unpublish_post_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> UnpublishPostUseCase:
+    return UnpublishPostUseCase(posts)
+
+
+async def get_delete_post_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+) -> DeletePostUseCase:
+    return DeletePostUseCase(posts)
+
+
+# ──────────────────── 互动上下文的用例工厂 ────────────────────
+
+
+async def get_list_comments_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+    comments: Annotated[CommentRepository, Depends(get_comment_repository)],
+    likes: Annotated[LikeRepository, Depends(get_like_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+) -> ListCommentsUseCase:
+    """评论树用例要同时拿到文章、评论、点赞、用户四个仓储。
+
+    这是**跨上下文编排**在依赖注入里的具体形状：``ListCommentsUseCase`` 需要
+    先按 id 定位文章（属于 blog 上下文），再取评论树（属于 interaction），
+    补上点赞统计（同属 interaction），最后批量把作者名解析出来（属于 identity）。
+    四个仓储共用一个 session、一个事务。
+
+    ★ 用户仓储之所以在这一层而不是在用例里自己 new：
+        作者名是**响应的一部分**，不是一个可选的装饰。
+        让它成为一个声明的依赖，就意味着“忘了接上它就根本跑不起来”，
+        而不是“跑起来了但名字是空的”（后者只会在界面上被发现有错）。
+
+    这里注入的是**接口**而不是实现，所以将来评论树改从缓存读，
+    只需要换掉 ``get_comment_repository`` 的那一行。
+    """
+    return ListCommentsUseCase(posts, comments, likes, users)
+
+
+async def get_post_interaction_stats_use_case(
+    comments: Annotated[CommentRepository, Depends(get_comment_repository)],
+    likes: Annotated[LikeRepository, Depends(get_like_repository)],
+) -> GetPostInteractionStatsUseCase:
+    """互动统计用例（喂给文章列表 / 详情的赞数与评论数）。"""
+    return GetPostInteractionStatsUseCase(comments, likes)
+
+
+async def get_create_comment_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+    comments: Annotated[CommentRepository, Depends(get_comment_repository)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+) -> CreateCommentUseCase:
+    """发评论也要用户仓储：返回值会被前端直接插进评论树，
+    所以“谁写的 / 回了谁”必须在同一个响应里给出。
+    """
+    return CreateCommentUseCase(posts, comments, users)
+
+
+async def get_delete_comment_use_case(
+    comments: Annotated[CommentRepository, Depends(get_comment_repository)],
+) -> DeleteCommentUseCase:
+    return DeleteCommentUseCase(comments)
+
+
+async def get_toggle_like_use_case(
+    posts: Annotated[PostRepository, Depends(get_post_repository)],
+    comments: Annotated[CommentRepository, Depends(get_comment_repository)],
+    likes: Annotated[LikeRepository, Depends(get_like_repository)],
+) -> ToggleLikeUseCase:
+    """点赞用例要三个仓储：目标可能是文章也可能是评论（多态），
+    所以两种目标的存在性检查都得能做。
+    """
+    return ToggleLikeUseCase(posts, comments, likes)
+
+
 # ──────────────────────────── 认证守卫 ────────────────────────────
 
 # auto_error=False：默认行为是缺 header 时抛 HTTPException(403)，
@@ -244,6 +411,81 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_current_user_id(current_user: CurrentUser) -> uuid.UUID:
+    """当前用户 id 的「非空版本」。
+
+    ``User.id`` 在类型上是 ``UUID | None``（实体在持久化之前确实没有 id），
+    但**从仓储取出来的实体必然已经落库**，所以这里的不可能分支只是给类型检查看的。
+
+    把这个断言收进一个依赖的理由：
+        写接口普遍只需要 id，不需要整个实体。如果让它们都拿 ``CurrentUser``
+        再各自写一遍 ``if user.id is None: raise ...``，那段守卫会被复制到每个端点；
+        漏写一处不会报错，只会在类型检查里变成一个 ``type: ignore``——
+        而 ``type: ignore`` 正是「我不知道这里安不安全」的白旗。
+    """
+    user_id = current_user.id
+    if user_id is None:  # pragma: no cover - 守卫出来的实体必然来自仓储，id 不会为空
+        raise TokenInvalidError()
+    return user_id
+
+
+# 只需要「谁在操作」而不需要用户其他字段时的标注糖。
+CurrentUserId = Annotated[uuid.UUID, Depends(get_current_user_id)]
+
+
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+    users: Annotated[UserRepository, Depends(get_user_repository)],
+) -> User | None:
+    """尽力识别当前用户：没带 token、token 失效或账号被停用，都返回 ``None``。
+
+    公开读接口（文章列表 / 详情）要在同一条路径上服务两种访问者：
+        游客 —— 已发布的文章人人可看；
+        作者本人 —— 连自己未发布的草稿也要能预览（编辑器里点「预览」就是这条路径）。
+
+    两者不能拆成两个接口：拆了就会出现「游客版详情」和「作者版详情」两份渲染逻辑，
+    而它们展示的明明是同一篇文章。所以阅读接口统一走「识别到就是本人，识别不到就是游客」。
+
+    ⚠️ 不能用「先试 ``get_current_user``、失败就兜成 None」来简化：
+        那需要在一个依赖里 ``try/except`` 另一个依赖，把 401 当成控制流；
+        而这个函数的作用是**返回 None**，不是「吞掉异常」。
+        另写一份显式实现，读起来才能一眼看到「哪些情况算游客」。
+
+    ⚠️ 与 ``get_current_user`` 的另一个区别：**账号被停用时返回 None 而不是 401**。
+        停用只应让写操作失效；一个失效的 token 不该让公开页面整体打不开。
+        此时它的可见范围退回游客口径（看不到自己的草稿），这是个安全的下沉选择。
+    """
+    if credentials is None:
+        return None
+
+    config = get_token_config()
+    try:
+        payload = decode_token(
+            credentials.credentials,
+            secret_key=config.secret_key,
+            algorithms=[config.algorithm],
+        )
+    except jwt.InvalidTokenError:
+        return None
+
+    subject = payload.get("sub")
+    if not isinstance(subject, str):
+        return None
+    try:
+        user_id = uuid.UUID(subject)
+    except ValueError:
+        return None
+
+    user = await users.get_by_id(user_id)
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
+# 公开读接口的标注糖：`viewer: OptionalCurrentUser` 一行表达「可能是游客」。
+OptionalCurrentUser = Annotated[User | None, Depends(get_optional_current_user)]
+
+
 def require_permission(code: str) -> Callable[..., Awaitable[User]]:
     """生成「要求当前用户拥有 ``code`` 权限」的依赖。
 
@@ -287,27 +529,78 @@ def require_permission(code: str) -> Callable[..., Awaitable[User]]:
     return _guard
 
 
+def require_permission_with_codes(
+    code: str,
+) -> Callable[..., Awaitable[frozenset[str]]]:
+    """要求当前用户拥有 ``code``，并把该用户的**全部权限码**一并返回。
+
+    为什么需要它（而不是「守卫 + 再查一次权限」）：
+        写文章的接口除了「有没有基础权限（``post:update``）」，
+        还要判断「有没有越权钥匙（``post:update_any``）」——
+        后者只影响「改自己的还是改别人的」，不是一个能拦住请求的门槛。
+
+        如果分两个依赖去取，同一个用户在这次请求里会被查两遍权限；
+        更要紧的是两次判断可能读到**不同的权限快照**：
+        管理员在两次查询之间撤了权，就会出现「守卫放行了、越权判定说没有」这种
+        自相矛盾的结果。合并成一次查询，两个判断共用同一份快照，不可能不一致。
+
+    返回值就是权限码集合，判定交给调用方写明条件（例如
+    ``PermissionCode.POST_UPDATE_ANY in codes``），而不是在这里猜「什么算越权」——
+    「基础码 → 对应哪个钥匙」是博客上下文的知识，不该渗进这个通用守卫。
+    """
+    required = code
+
+    async def _guard(
+        current_user: CurrentUser,
+        access: Annotated[AccessRepository, Depends(get_access_repository)],
+    ) -> frozenset[str]:
+        user_id = current_user.id
+        if user_id is None:  # pragma: no cover - 守卫出来的实体必然来自仓储，id 不会为空
+            raise TokenInvalidError()
+
+        owned = frozenset(await access.get_permission_codes(user_id))
+        if required not in owned:
+            raise PermissionDeniedError(required)
+        return owned
+
+    return _guard
+
+
 # 认证（401）与授权（403）分属两个异常，异常处理器据此映射状态码。
 # 这里不做「已登录就一定有权限」之类的兜底——默认拒绝，漏挂守卫的接口会 401 而不是放行。
 
 
 __all__ = [
     "CurrentUser",
+    "CurrentUserId",
+    "OptionalCurrentUser",
     "get_access_repository",
     "get_assign_roles_use_case",
     "get_change_password_use_case",
+    "get_create_post_use_case",
     "get_current_user",
+    "get_current_user_id",
     "get_current_user_use_case",
+    "get_delete_post_use_case",
+    "get_list_my_posts_use_case",
     "get_list_permissions_use_case",
+    "get_list_published_posts_use_case",
     "get_list_roles_use_case",
     "get_list_user_roles_use_case",
     "get_list_users_use_case",
     "get_login_use_case",
     "get_my_access_use_case",
+    "get_optional_current_user",
+    "get_post_by_slug_use_case",
+    "get_post_repository",
+    "get_publish_post_use_case",
     "get_register_use_case",
     "get_reset_user_password_use_case",
     "get_token_config",
+    "get_unpublish_post_use_case",
+    "get_update_post_use_case",
     "get_update_profile_use_case",
     "get_user_repository",
     "require_permission",
+    "require_permission_with_codes",
 ]

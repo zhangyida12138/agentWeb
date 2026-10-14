@@ -1,9 +1,35 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, EmailStr, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ────────────────────────────── 该读哪些 env 文件 ──────────────────────────────
+# 本文件位置：src/app/core/config.py → parents[3] == apps/backend
+_BACKEND_DIR = Path(__file__).resolve().parents[3]
+_BASE_ENV_FILE = _BACKEND_DIR / ".env"
+
+
+def _resolve_env_name() -> str:
+    """先定「现在是什么环境」，才能决定读哪些 env 文件。
+
+    这里只能看 ``os.environ``：``Settings.app.env`` 正是由这些文件决定的，
+    「读哪个文件」这件事本身就是鸡生蛋。代价是它必须在**首次导入本模块之前**
+    设好（测试里由 ``tests/conftest.py`` 在 import app.* 之前钉成 test）。
+    """
+
+    return os.environ.get("APP__ENV", "development").strip().lower()
+
+
+_ENV_NAME = _resolve_env_name()
+# 叠加顺序：.env → .env.<env>，**靠后的覆盖靠前的**（pydantic-settings 按顺序 deep_update）。
+# 有了这条规则，「公共配置」和「环境差异」就能分开放：开发库和测试库只差一行 DB__URL，
+# 而不是把整份 .env 复制一遍再改三个地方——复制出来的副本迟早会和原版漂移。
+# 文件不存在会被静默跳过（pydantic-settings 的行为），所以 CI 里没有 .env、
+# 只有 .env.test 也能跑起来。
+_ENV_FILES: tuple[Path, ...] = (_BASE_ENV_FILE, _BACKEND_DIR / f".env.{_ENV_NAME}")
 
 
 class AppSettings(BaseModel):
@@ -91,8 +117,10 @@ class Settings(BaseSettings):
         CORS__ALLOW_*     → cors.allow_*
         LLM__BASE_URL     → llm.base_url
 
-    优先级（由高到低）：真实进程环境变量 → .env 文件 → 字段默认值。
-    .env 的路径已锚定到 apps/backend/.env，与启动时的工作目录无关。
+    优先级（由高到低）：真实进程环境变量 → .env.<env> → .env → 字段默认值。
+
+    env 文件的路径已锚定到 apps/backend，与启动时的工作目录无关；
+    ``<env>`` 取自 APP__ENV（默认 development），见文件顶部的 _ENV_FILES。
     """
 
     model_config = SettingsConfigDict(
@@ -102,8 +130,7 @@ class Settings(BaseSettings):
         # 而 extra="ignore" 会把不认识的键静默丢弃，于是所有字段统统回落到默认值，
         # 不报任何错（表现为改 .env 不生效、连的库和 debug 开关都不对）。
         # 这里锚定到本文件位置：src/app/core/config.py → parents[3] == apps/backend
-        # 注：文件不存在时 pydantic-settings 会静默跳过，因此容器里只注入环境变量的场景不受影响。
-        env_file=Path(__file__).resolve().parents[3] / ".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         env_prefix="",  # 无前缀，直接用子模型名 __ 字段名

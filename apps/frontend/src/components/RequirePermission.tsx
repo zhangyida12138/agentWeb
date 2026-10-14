@@ -4,6 +4,7 @@ import { Outlet } from 'react-router-dom'
 import { Alert } from './Alert'
 import { ApiError } from '../lib/api'
 import { useMyAccessQuery } from '../features/access/hooks'
+import { hasAnyPermission } from '../features/access/permissions'
 import type { PermissionCode } from '../features/access/permissions'
 
 /**
@@ -28,7 +29,8 @@ export function RequirePermission({
   permission,
   children,
 }: {
-  permission: PermissionCode
+  /** 单个权限码，或一组「满足其一」的权限码。 */
+  permission: PermissionCode | readonly PermissionCode[]
   /**
    * 不传时渲染 `<Outlet />`。
    *
@@ -40,6 +42,7 @@ export function RequirePermission({
   children?: ReactNode
 }) {
   const accessQuery = useMyAccessQuery()
+  const required = typeof permission === 'string' ? [permission] : permission
 
   if (accessQuery.isPending) {
     return <p className="text-sm text-gray-500">加载中…</p>
@@ -55,9 +58,11 @@ export function RequirePermission({
     )
   }
 
-  if (!accessQuery.data?.permission_codes.includes(permission)) {
+  if (!hasAnyPermission(accessQuery.data?.permission_codes, required)) {
     return (
-      <Alert tone="error">你没有访问该页面所需的权限（{permission}）。请联系管理员为你分配。</Alert>
+      <Alert tone="error">
+        你没有访问该页面所需的权限（{required.join(' 或 ')}）。请联系管理员为你分配。
+      </Alert>
     )
   }
 

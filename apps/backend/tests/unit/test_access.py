@@ -104,6 +104,9 @@ class _EmptyUsers(UserRepository):
     async def get_by_id(self, user_id: UUID) -> User | None:
         raise NotImplementedError
 
+    async def get_by_ids(self, user_ids: Sequence[UUID]) -> dict[UUID, User]:
+        raise NotImplementedError
+
     async def list_paged(self, offset: int, limit: int) -> list[User]:
         raise NotImplementedError
 
@@ -153,14 +156,20 @@ def test_admin_holds_every_declared_permission() -> None:
 
 
 def test_reader_permission_count() -> None:
-    """reader 恰好是「评论 + 点赞 + AI」，不多不少。
+    """reader 恰好是「发评论 + 删自己的评论 + 点赞 + AI」，不多不少。
 
     写死数量而不是只判包含：「多给了权限」和「少给了权限」一样是事故，
     而只判包含的写法对前者完全无感。
+
+    这里同时钉住一条**产品判断**：删自己的评论是 reader 的默认能力，
+    而不是需要升级角色才有的特权。作者/读者都能撤回自己说错的话，
+    「删除权」在评论这条线上属于作者本人（归属），不属于角色等级——
+    真正被 admin 独占的是 ``comment:delete_any``（删**别人**的评论）。
     """
     assert _spec(RoleCode.READER).permissions == frozenset(
         {
             PermissionCode.COMMENT_CREATE,
+            PermissionCode.COMMENT_DELETE,
             PermissionCode.LIKE_TOGGLE,
             PermissionCode.AGENT_CHAT,
         }

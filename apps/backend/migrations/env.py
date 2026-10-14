@@ -14,7 +14,11 @@ from app.infrastructure.persistence.base import Base
 
 config = context.config
 
-if config.config_file_name is not None:
+# 以编程方式调用 alembic（例如测试夹具）时，可以通过 config.attributes
+# 里的 skip_logging_config 让我们跳过 [logger_*] 段：
+# fileConfig() 默认 disable_existing_loggers=True，会把 pytest 与业务已经装好的
+# logger 全部关掉——测试失败时最需要的日志反而最先消失。
+if config.config_file_name is not None and not config.attributes.get("skip_logging_config"):
     fileConfig(config.config_file_name)
 
 _settings = get_settings()

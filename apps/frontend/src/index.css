@@ -30,39 +30,42 @@ body {
 /* ──────────────────────────── 滚动条 ──────────────────────────── */
 
 /*
- * 隐藏滚动条，但**只隐藏「显示」、保留「滚动能力」**。
+ * 页面级滚动条：**保留它，但让它不参与布局**。
  *
- * 目标只是去掉视觉噪音：Windows 上那条常驻的灰色槽在浅色页面里非常扎眼，
- * 而它传达的信息（「这里能滚」）在这个布局里几乎总是多余的——页脚没有内容，
- * 主区是一路向下的卡片流，滚动是唯一出路。
+ * 之前这里把整条滚动条隐藏了（`scrollbar-width: none`），理由是 Windows 那条
+ * 常驻的灰色槽在浅色页面里扎眼。代价是失去了「下面还有内容」这个视觉提示——
+ * 页面里唯一能替代它的线索是内容被截断的位置，而那个线索很不可靠。
+ * 现在改成「留着，但压得很轻」，两个目标同时满足。
  *
- * 隐藏滚动条不影响任何操作方式：滚轮、触控板、键盘（空格 / PageUp / PageDown /
- * 方向键 / Home / End）以及 `scrollIntoView` 之类的程序化滚动全部照常。
- * 唯一真正失去的是「右侧还有内容」这个视觉提示，所以这条规则只在
- * ① 页面级（内容显然会延伸到底）② 明确可横滑的表格 这两种场景下使用，
- * 不要套到「内容可能被截断且用户无从察觉」的容器上。
+ * 重点是「不改变布局」——它有一个真实存在、且只在特定路径上出现的故障：
+ *   首页内容短 -> 没有滚动条 -> 主区宽 100%
+ *   文章列表长 -> 出现滚动条 -> 主区被挤窄
+ *   在两者之间导航时，整页内容会**横向抽动**一下，居中标题也会跟着偏。
+ * 修法是同时用两条声明，缺一不可：
+ *   ① `overflow-y: scroll`：滚动条槽永远占位，页短也不还回去（全局兼容，兜底）；
+ *   ② `scrollbar-gutter: stable`：不显示滚动条时也预留它的宽度。
+ * 在支持 ② 的浏览器上，① 的滚动条已是常驻，② 不再额外占宽，两者不会叠加成双倍空白。
+ * 之所以还要写 ①：Safari 到 18.2 才支持 ②，拿它当唯一手段的话老 Safari 上依旧会抽。
  *
- * 为什么写在 index.css 而不是做成 UnoCSS 工具类：`::-webkit-scrollbar` 是伪元素选择器，
- * 用工具类表达需要自定义 utility；而这里总共两条规则、也不需要响应式变体，
- * 直接写 CSS 更好读，也少一层「这个类到底有没有被生成出来」的不确定性。
- *
- * 三条声明缺一不可：`scrollbar-width` 管 Firefox，`-ms-overflow-style` 管旧版
- * Edge/IE（写在新版里是惰性的，留着只为兼容），`::-webkit-scrollbar` 管
- * Chrome / Safari / 新版 Edge。只写 WebKit 那一条的话，Firefox 用户仍会看到滚动条。
+ * 为什么要自定义颜色而不是用系统默认：默认轨道是浅灰实心底，正是之前被嫌弃的那个样子。
+ * 把轨道设成 transparent、滑块用中性灰，视觉重量就降到了接近「一条细线」。
+ * 样式只作用于 `html`，**不继承**（scrollbar-color / scrollbar-gutter 都不是继承属性），
+ * 所以表格旁边那些内部横滚容器不受影响，仍然走下面的 `.no-scrollbar`。
  */
 html {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-html::-webkit-scrollbar {
-  display: none;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 /*
  * 内部滚动容器用的版本，用法：`<div class="overflow-x-auto no-scrollbar">`。
  *
- * 作用域是元素而不是视口，所以两个场景可以分别取舍。
+ * 作用域是元素而不是视口，所以两个场景可以分别取舍：页面级要「一直都在」，
+ * 表格这类容器要「完全不见」——它们的滚动是跟随手指/轨道滑动的副产品，
+ * 一条常驻的槽会把表格挤歪，而表格本来就靠内容溢出自己提示「还能往右看」。
+ *
  * 这里不加 `!important`：本文件在 main.tsx 里排在 `virtual:uno.css` **之后**导入，
  * 同优先级下后者会被覆盖——顺序本身就是这里的约束，改动导入顺序会让这条失效。
  */
@@ -73,4 +76,180 @@ html::-webkit-scrollbar {
 
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* ──────────────────────── Markdown 正文排版 ──────────────────────── */
+
+/*
+ * 文章正文（`MarkdownContent` 组件）的排版规则。
+ *
+ * 为什么是一份 CSS 而不是 UnoCSS 工具类：
+ *   Markdown 会渲染出哪些标签由**内容**决定，编译期不知道；把 class 写在
+ *   Markdown 源里又等于让作者关心样式。所以只能反向——用元素选择器统一定义一次。
+ *   这也意味着这里的 `.markdown-body` 是**唯一**一处可以出现裸元素选择器的地方，
+ *   其他组件请继续用工具类，别在这里顺手加业务样式。
+ *
+ * 作用域收在 `.markdown-body` 内：这些规则会影响到里面所有后代，
+ * 不加作用域就会波及全站（比如全站的 `a` 都变成品牌紫、所有表格都被加上边框）。
+ */
+.markdown-body {
+  color: #1f2937;
+  font-size: 15px;
+  line-height: 1.75;
+  /* 长 URL、超宽表格不该把整个页面撑出横向滚动条 */
+  overflow-wrap: break-word;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 1.6em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #111827;
+}
+
+.markdown-body h1 {
+  font-size: 1.5em;
+}
+
+.markdown-body h2 {
+  font-size: 1.25em;
+  /* 二级标题下的下划线是全文唯一的分节线，够用就好 */
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.markdown-body h3 {
+  font-size: 1.1em;
+}
+
+.markdown-body h4 {
+  font-size: 1em;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre,
+.markdown-body table {
+  margin: 0.9em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+}
+
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
+.markdown-body li {
+  margin: 0.25em 0;
+}
+
+/* GFM 任务列表：`- [x] xxx`。原生复选框默认会和文字错开一行，靠 flex 对齐 */
+.markdown-body li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.25em;
+}
+
+.markdown-body li > input[type='checkbox'] {
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
+
+.markdown-body a {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+.markdown-body blockquote {
+  padding: 0.2em 1em;
+  border-left: 3px solid #e5e7eb;
+  color: #4b5563;
+}
+
+.markdown-body code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background-color: #f3f4f6;
+  font-size: 0.875em;
+  /* 等宽字体要放在中文回退字体**之前**，否则行内代码会跟着正文变成中文字形 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 代码块里的 code 不该再有行内代码那种底色和 padding，否则会出现双层背景 */
+.markdown-body pre {
+  padding: 1em;
+  border-radius: 10px;
+  background-color: #1f2937;
+  color: #f9fafb;
+  /* 代码行普遍比正文宽，只让代码块自己横滑，不要带动整页 */
+  overflow-x: auto;
+  /*
+   * 这里的滚动条单独配色：容器是深色的，跟着系统走会甩出一条浅灰滑槽，
+   * 是整篇正文里最亮的一块。同样只写标准属性（不写 `::-webkit-scrollbar`）——
+   * 同一元素上只要 `scrollbar-width` 不是 auto，Chrome 就会忽略 WebKit 那套，
+   * 两套一起写等于只有一套生效，不如只留一套。
+   */
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 transparent;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background-color: transparent;
+  color: inherit;
+  font-size: 0.875em;
+}
+
+.markdown-body hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 10px;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375em;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.5em 0.75em;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.markdown-body th {
+  background-color: #f9fafb;
+  font-weight: 600;
 }

@@ -19,10 +19,20 @@ import {
  *   表格不会在切页瞬间塌成空白再长出来。
  */
 
-export function useMyAccessQuery() {
+/**
+ * 当前用户的权限快照。
+ *
+ * `enabled` 是给**公开页面**用的：文章列表 / 详情未登录也能看，
+ * 但页头要靠权限快照决定「写文章」按钮显不显示。
+ * 此时不能直接发请求——`/auth/me/access` 未登录必然 401，
+ * 而 api 层收到 401 会清掉登录态，等于「看一篇公开文章顺手把自己登出」。
+ * 未登录时传 `enabled: false`，全程只有一次必然失败的请求被省下来。
+ */
+export function useMyAccessQuery(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: accessKeys.myAccess,
     queryFn: fetchMyAccess,
+    enabled: options.enabled ?? true,
     staleTime: 5 * 60 * 1000,
   })
 }

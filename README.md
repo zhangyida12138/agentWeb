@@ -35,6 +35,20 @@ make db-up
 
 会用 `postgres:16-alpine` 在 `localhost:5432` 启动容器，库名 `agent_web`，账号密码均为 `postgres`。
 
+测试用的是**另一个容器**（`postgres-test`，`localhost:5433`，库名 `agent_web_test`，独立数据卷），
+它不会被 `make db-up` 顺带拉起，也不会被测试写坏：
+
+```bash
+make db-test-up      # 启测试库（只在跑测试时需要）
+make db-test-down    # 停测试库
+```
+
+`make test` 会自动带上 `db-test-up`，直接执行 `uv run pytest` 也可以——
+pytest 会在需要连库时（集成测试）自己校库名、迁移到 head；
+测试用的环境变量全在 **`apps/backend/.env.test`**（不含机密，可提交）。
+单跑单元测试（`uv run pytest tests/unit`）连 Docker 都不需要。
+详见 [apps/backend/README.md](apps/backend/README.md#测试)。
+
 后端默认配置（`app/core/config.py`）与 `docker-compose.yml` 已对齐，**不创建 `.env` 也能直接跑**。如需自定义，复制 `apps/backend/.env.example` 为 `apps/backend/.env` 后修改。
 
 ### 3. 初始化数据库表
@@ -79,6 +93,7 @@ make dev
 | `make lint` | 代码检查（ruff + eslint） |
 | `make format` | 代码自动格式化（ruff + prettier） |
 | `make db-up` / `make db-down` | 启停 PostgreSQL 容器 |
+| `make db-test-up` / `make db-test-down` | 启停测试用 PostgreSQL 容器（5433，独立数据卷） |
 
 数据库迁移在后端目录执行（`cd apps/backend`）：
 
@@ -98,7 +113,7 @@ agentWeb/
 ├── packages/
 │   ├── backend/shared/   # Python 共享包 agent-web-shared（工具函数等）
 │   └── frontend/shared/  # 前端共享包 @agent-web/shared（工具函数、hooks 等）
-├── docker-compose.yml    # PostgreSQL 容器
+├── docker-compose.yml    # PostgreSQL 容器（开发 5432 / 测试 5433，各自独立数据卷）
 ├── Makefile              # 统一命令入口
 └── .husky/pre-commit     # 提交前自动格式化改动文件
 ```

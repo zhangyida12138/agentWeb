@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install db-up db-down dev dev-backend dev-frontend \
+.PHONY: help install db-up db-down db-test-up db-test-down dev dev-backend dev-frontend \
 	format lint test test-backend test-frontend build build-backend build-frontend
 
 help:
@@ -8,6 +8,8 @@ help:
 	@echo   make install         Install backend (uv) and frontend (pnpm) dependencies
 	@echo   make db-up           Start the PostgreSQL and pgAdmin containers
 	@echo   make db-down         Stop the PostgreSQL and pgAdmin containers
+	@echo   make db-test-up      Start the dedicated test PostgreSQL container (port 5433)
+	@echo   make db-test-down    Stop the dedicated test PostgreSQL container
 	@echo   make dev             Run backend and frontend dev servers together
 	@echo   make dev-backend     Run only the FastAPI dev server on http://localhost:8000
 	@echo   make dev-frontend    Run only the Vite dev server on http://localhost:5173
@@ -25,6 +27,16 @@ db-up:
 
 db-down:
 	docker compose down
+
+# 测试库：docker-compose.yml 里的 postgres-test（独立实例 / 独立数据卷，5433）。
+# --wait：等 healthcheck 通过再返回，省掉 pytest 那边因为库还在初始化而白等的几秒。
+# 命令前的 `-` 表示失败不中断 make：Docker 没启动时不至于直接报错退出，
+# pytest 在会话开始时会自己探测，探不到会打印「先执行 make db-test-up」的明确提示。
+db-test-up:
+	-@docker compose up -d --wait postgres-test
+
+db-test-down:
+	-@docker compose stop postgres-test
 
 # 直接复用下面两条命令字符串，避免嵌套调用 $(MAKE)：
 # Windows 上 make 的完整路径可能含空格（如 "C:/Program Files (x86)/GnuWin32/bin/make"），
@@ -54,7 +66,9 @@ lint:
 
 test: test-backend test-frontend
 
-test-backend:
+# 依赖 db-test-up：跑测试和启动测试库不该是两个需要记住的步骤。
+# 测试用的环境变量（含测试库地址）都在 apps/backend/.env.test，不在命令里。
+test-backend: db-test-up
 	uv run --directory apps/backend pytest
 
 test-frontend:

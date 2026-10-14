@@ -17,6 +17,34 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── 测试库：独立实例 + 独立数据卷 ──────────────────────────────────────
+  # 为什么不复用上面的 postgres 换个库名：测试会反复建表、跑迁移、验证约束，
+  # 只要有一次库名写错（或 DB__URL 被环境变量带偏），清掉的就是开发数据。
+  # 换成独立容器后，「测试库」在物理上（进程、端口、数据卷）就够不着开发数据。
+  #
+  # 只在跑测试时启动：make db-test-up（不会跟着 make db-up 一起起来）。
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: agent-web-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-agent_web_test}
+    ports:
+      - '${POSTGRES_TEST_PORT:-5433}:5432' # 刻意与开发库的 5432 错开，避免误连
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_TEST_DB:-agent_web_test}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   pgadmin:
     image: dpage/pgadmin4:8
     container_name: pgadmin
@@ -34,4 +62,5 @@ services:
 
 volumes:
   postgres_data:
+  postgres_test_data:
   pgadmin_data:

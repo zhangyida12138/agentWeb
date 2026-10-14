@@ -8,7 +8,7 @@ import { createQueryClient } from '../lib/query-client'
 import { clearAuth, setAuth } from '../stores/auth'
 import { installFetchMock } from '../test/api-mock'
 
-import { AppLayout } from './AppLayout'
+import { SiteLayout } from './SiteLayout'
 
 import type { AuthUser, TokenPayload } from '../features/auth/types'
 
@@ -71,7 +71,7 @@ function renderLayout(client: QueryClient) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route element={<AppLayout />}>
+          <Route element={<SiteLayout />}>
             <Route index element={<p>首页内容</p>} />
           </Route>
         </Routes>
@@ -89,7 +89,7 @@ function userManagementTab() {
   return screen.queryByRole('link', { name: TAB })
 }
 
-describe('AppLayout 导航的权限过滤', () => {
+describe('SiteLayout 导航的权限过滤', () => {
   it('有 user:list 时把用户管理入口放出来', async () => {
     setAuth(token('token-admin'), ADMIN_USER)
     installFetchMock(accessHandler(ADMIN_USER, ['user:list', 'role:list']))

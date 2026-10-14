@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import NoReturn
 
 from sqlalchemy import Select, func, select
@@ -94,6 +95,27 @@ class SqlUserRepository(UserRepository):
     async def get_by_username(self, username: Username) -> User | None:
         stmt = select(UserModel).where(UserModel.username == username.value)
         return await self._one(stmt)
+
+    async def get_by_ids(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, User]:
+        """一条 ``IN`` 查出多个用户，返回 ``{id: User}``。
+
+        空列表要提前返回：``IN ()`` 在部分驱动下是语法错误，
+        而「一页评论一个作者都取不到」是正常情况而不是异常。
+        （拼树时作者 id 是从评论里收集来的，一页全空或全是被删用户的评论都会走到这里。）
+
+        用 ``IN`` 而不是逐个 ``session.get``：
+            后者是 N 次往返，且 N 随页大小增长。
+            这里恒定一次往返，与要查多少个 id 无关。
+
+        返回 ``list`` 再 dict 而不是直接构造映射：
+            顺序无关，而 ``id`` 是主键、结果里不会重复，所以构建字典不会丢行。
+            缺失的 id 不出现在字典里（见接口契约：不补占位值）。
+        """
+        if not user_ids:
+            return {}
+        stmt = select(UserModel).where(UserModel.id.in_(user_ids))
+        models = (await self._session.execute(stmt)).scalars().all()
+        return {model.id: to_entity(model) for model in models}
 
     async def update(self, user: User) -> User:
         if user.id is None:
