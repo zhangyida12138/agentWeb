@@ -73,6 +73,13 @@ class PermissionCode:
     #   但这条能力绝不能顺带发给读者，否则「只能删自己的」这条规则就没了。
     COMMENT_DELETE_ANY: Final = "comment:delete_any"
     LIKE_TOGGLE: Final = "like:toggle"
+    # ── 标签 ──
+    # 只有一个码，没有 tag:create / tag:update / tag:delete 四个。
+    #   标签的写操作全部只发给管理员（作者改自己标签的权限来自归属，不是权限码，
+    #   见 ``Tag.ensure_manageable_by``），所以拆成四个码只会得到四个
+    #   永远同时出现/消失的常量——而「总是同时变的东西不该是四个东西」。
+    #   一个码也让「谁能维护词汇表」这件事在权限页面上是一行，而不是四行。
+    TAG_MANAGE: Final = "tag:manage"
     # ── AI Agent ──
     AGENT_CHAT: Final = "agent:chat"
 
@@ -125,6 +132,11 @@ PERMISSION_SPECS: Final[tuple[PermissionSpec, ...]] = (
         "越过作者归属限制，删除他人的评论（违规内容处置）",
     ),
     PermissionSpec(PermissionCode.LIKE_TOGGLE, "点赞 / 取消点赞"),
+    PermissionSpec(
+        PermissionCode.TAG_MANAGE,
+        "管理标签",
+        "新建、下架、删除标签（作者仍可编辑自己创建的标签，无需此权限）",
+    ),
     PermissionSpec(PermissionCode.AGENT_CHAT, "使用 AI 助手"),
 )
 
@@ -149,6 +161,12 @@ _AUTHOR_PERMISSIONS: Final = _READER_PERMISSIONS | {
     PermissionCode.POST_PUBLISH,
     PermissionCode.POST_DELETE,
 }
+
+# 作者与读者**刻意都不包含** TAG_MANAGE：
+#   标签是公共词汇表，改动它（尤其删除）会让所有用过它的文章一起变样。
+#   作者能改自己创建的标签，靠的是**归属**（``Tag.ensure_manageable_by``），
+#   不需要也不该拿到一个「可以改任何标签」的权限码——
+#   那等于把行级规则换成了身份规则，同时也推翻了「删除只给管理员」这条线。
 
 # 作者**刻意不包含** POST_UPDATE_ANY / POST_DELETE_ANY / COMMENT_DELETE_ANY：
 #   这几个码不是「更强一点的编辑权」，而是「跨过归属检查的钥匙」。

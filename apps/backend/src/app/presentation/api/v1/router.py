@@ -11,6 +11,7 @@ from app.presentation.api.v1.endpoints.likes import router as likes_router
 from app.presentation.api.v1.endpoints.posts import me_router as posts_me_router
 from app.presentation.api.v1.endpoints.posts import router as posts_router
 from app.presentation.api.v1.endpoints.roles import router as roles_router
+from app.presentation.api.v1.endpoints.tag import router as tag_router
 from app.presentation.api.v1.endpoints.users import router as users_router
 
 # v1 总路由：所有业务 endpoint 都在这里 include
@@ -33,5 +34,8 @@ api_router.include_router(post_comments_router)
 api_router.include_router(comments_router)
 api_router.include_router(likes_router)
 api_router.include_router(post_interaction_router)
+# tag 上下文：/tags。没挂在 /posts 下是因为标签的生命周期比文章长——
+# 一篇文章删了，标签还在（还有别的文章在用），所以它是独立资源而不是文章的子资源。
+api_router.include_router(tag_router)
 
 __all__ = ["api_router"]

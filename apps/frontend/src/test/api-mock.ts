@@ -20,11 +20,26 @@ export interface MockReply {
 
 export type FetchHandler = (url: string, init: RequestInit) => MockReply
 
+/**
+ * 无内容的状态码。
+ *
+ * `new Response(body, { status: 204 })` 会**抛 TypeError**
+ * （"Response with null body status cannot have body"），不是返回一个空响应。
+ * 而删除类接口（文章、评论、标签）后端回的都是 204——
+ * 不单独处理的话，这类用例里 fetch 会以一个 TypeError 结堆，
+ * 前端 catch 到之后弹一个"删除失败，请稍后重试"，
+ * 于是测试看到的是"弹窗关不掉"这样一个与真实原因毫无关系的现象。
+ */
+const NULL_BODY_STATUSES = new Set([204, 205, 304])
+
 /** 替换全局 fetch，返回的 mock 可用于断言「请求了几次、带了什么 body」。 */
 export function installFetchMock(handler: FetchHandler) {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : String(input)
     const { status = 200, code = 0, message = 'ok', data = null } = handler(url, init ?? {})
+
+    if (NULL_BODY_STATUSES.has(status)) return new Response(null, { status })
+
     return new Response(JSON.stringify({ code, message, data }), {
       status,
       headers: { 'Content-Type': 'application/json' },

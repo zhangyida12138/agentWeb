@@ -21,6 +21,14 @@ interface PagerProps {
   /** 请求进行中：禁用按钮，避免连点造成多次跳页 */
   isFetching?: boolean
   onOffsetChange: (nextOffset: number) => void
+  /**
+   * 计数单位，默认 `篇`（文章的两个列表）。
+   *
+   * 做成参数而不是让标签列表复用一个说"共 30 篇标签"的控件：
+   * 量词错了不会报错，只会一直显示错的字——而「共 N 篇」出现在标签页上时，
+   * 用户的第一反应是"这里数的是文章还是标签？"。
+   */
+  unit?: string
 }
 
 export function Pager({
@@ -30,6 +38,7 @@ export function Pager({
   itemCount,
   isFetching = false,
   onOffsetChange,
+  unit = '篇',
 }: PagerProps) {
   if (limit <= 0 || total <= 0) return null
 
@@ -43,7 +52,7 @@ export function Pager({
   return (
     <div className="flex items-center justify-end gap-3 text-sm">
       <span className="text-gray-500">
-        第 {page + 1} / {pageCount} 页 · 共 {total} 篇
+        第 {page + 1} / {pageCount} 页 · 共 {total} {unit}
       </span>
       <button
         type="button"

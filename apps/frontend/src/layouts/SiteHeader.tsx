@@ -53,6 +53,11 @@ function buildNavItems(authenticated: boolean, codes: readonly string[] | undefi
     { to: '/', label: '首页', end: true },
     { to: '/posts', label: '文章', end: false },
     { to: '/my/posts', label: '我的文章', end: false },
+    // 标签的入口分两层，与后端的两个维度一一对应：
+    //   「我的标签」只要求登录（和「我的文章」一样，依据是归属不是权限），
+    //   「标签管理」要 tag:manage。普通用户看不到第二个入口——
+    //   置灰的入口对他永远是灰的，他不知道该找谁点亮，也不知道点亮了能干什么。
+    { to: '/my/tags', label: '我的标签', end: false },
   ]
 
   // 写文章要看的是「能不能产出文章」。`post:update_any` 也算：
@@ -66,6 +71,14 @@ function buildNavItems(authenticated: boolean, codes: readonly string[] | undefi
 
   if (hasPermission(codes, PERMISSION.USER_LIST)) {
     items.push({ to: '/admin/users', label: '用户管理', end: false })
+  }
+
+  // 标签管理的入口**只**挂 tag:manage，不是"能看标签就给"：
+  //   这一页的默认筛选是"全部 + 全站"，「我的标签」那一页已经覆盖了
+  //   "我想整理自己的东西"这个需求。给普通作者一个会 403 的入口，
+  //   只会让他怀疑自己权限配错了。
+  if (hasPermission(codes, PERMISSION.TAG_MANAGE)) {
+    items.push({ to: '/admin/tags', label: '标签管理', end: false })
   }
 
   return items

@@ -154,6 +154,30 @@ async def test_published_post_is_readable_anonymously(
     assert second.json()["data"]["view_count"] == 2
 
 
+async def test_reading_a_post_does_not_count_as_an_edit(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ 回归测试：浏览量自增**不能**顺手把 ``updated_at`` 推到现在。
+
+    这个 bug 的成因极其隐蔽：``TimestampMixin.updated_at`` 声明了 ``onupdate=_utc_now``，
+    于是任何一条**没有显式列出该列**的 Core ``update()`` 语句，SQLAlchemy 都会自动补上
+    ``updated_at=now()``。``increment_view_count`` 当初只写了 ``view_count``，就中招了。
+
+    它在库里的表现是：「文章列表按 ``updated_at`` 排序」被一次匿名访问搅乱，
+    以 ``updated_at`` 为键的缓存/增量同步全部失真——而这一切**不会报错、不会让任何
+    关于状态码或字段的断言变红**，只能靠钉住「这个列没被动过」来发现。
+    """
+    _, headers = await _actor(client, db_session, RoleCode.AUTHOR)
+    post = await _create_post(client, headers, slug="view-does-not-edit")
+    await _publish(client, headers, str(post["id"]))
+
+    before = (await client.get(f"{POSTS_URL}/view-does-not-edit")).json()["data"]
+    after = (await client.get(f"{POSTS_URL}/view-does-not-edit")).json()["data"]
+
+    assert after["view_count"] == before["view_count"] + 1
+    assert after["updated_at"] == before["updated_at"]
+
+
 async def test_author_reading_own_post_does_not_inflate_view_count(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

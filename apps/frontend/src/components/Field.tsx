@@ -63,6 +63,16 @@ interface TextFieldProps {
   hint?: ReactNode
   /** 输入时是否原样保留（密码框不需要 trim） */
   trim?: boolean
+  /**
+   * 挂载后自动聚焦。
+   *
+   * 存在的理由不是"体验更好"，而是 `Modal` 明确把焦点这件事交给了调用方：
+   * 它没有实现焦点陷阱（代码量比弹窗本身还大），只留了 `autoFocus` 这一个出口。
+   * 没有这个属性的话，弹窗里唯一能自动聚焦的元素就只有 `<select>`——
+   * 于是"新建标签"会默认聚焦在类型上而不是名字上，用户打开弹窗后
+   * 打出来的字会跑进错误的地方。
+   */
+  autoFocus?: boolean
 }
 
 export function TextField({
@@ -79,6 +89,7 @@ export function TextField({
   error,
   hint,
   trim = true,
+  autoFocus,
 }: TextFieldProps) {
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value
@@ -106,6 +117,7 @@ export function TextField({
         maxLength={maxLength}
         required={required}
         disabled={disabled}
+        autoFocus={autoFocus}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         className={`${CONTROL_CLASS} ${

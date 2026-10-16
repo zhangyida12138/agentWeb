@@ -64,6 +64,13 @@
 
 - 评论、点赞（M5）
 - 标签**管理**后台（本期标签只支持「随文章提交、自动创建」，不做独立 CRUD）
+
+> ⚠️ **本条已被推翻（后续补做）**：标签后来长出了独立上下文。
+> 后端见 `domain|application|infrastructure|presentation` 下的 `tag/`，
+> 迁移 `8c41d2f7a930_add_tag_management_fields.py`，
+> 接口 `GET|POST /api/v1/tags`、`PUT|DELETE /api/v1/tags/{id}`、`PATCH /api/v1/tags/{id}/status`，
+> 新权限码 `tag:manage`（仅 admin）。要点集中在 `ARCHITECTURE.md` §7.6。
+
 - 文章全文搜索、富文本编辑器（本期用 Markdown 纯文本域）
 - 图片上传（`cover_url` 本期只存外链字符串）
 

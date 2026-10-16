@@ -12,6 +12,8 @@ import { PostDetailPage } from './features/post/PostDetailPage'
 import { PostEditorPage } from './features/post/PostEditorPage'
 import { PostListPage } from './features/post/PostListPage'
 import { ProfilePage } from './features/profile/ProfilePage'
+import { MyTagsPage } from './features/tag/MyTagsPage'
+import { TagManagementPage } from './features/tag/TagManagementPage'
 import { SiteLayout } from './layouts/SiteLayout'
 import { HomePage } from './pages/HomePage'
 
@@ -83,6 +85,13 @@ export const router = createBrowserRouter([
           //   仍然能翻到自己写过的草稿」是同一条理由。后端 `GET /me/posts` 亦然。
           { path: 'my/posts', element: <MyPostsPage /> },
 
+          // 「我的标签」与「我的文章」同一条理由：只要求登录，不挂权限码。
+          //   这一页的约束是**归属**（查询里带着 author_id = 我），不是权限——
+          //   权限再收一遍也只是把"自己的东西"变成"自己有权看的自己的东西"。
+          //   后端对应的实现是 `Tag.ensure_manageable_by` 里
+          //   「user · 我的 → 任何人」那一行，两边必须是同一个口径。
+          { path: 'my/tags', element: <MyTagsPage /> },
+
           // 编辑器两个入口的钥匙不同：新建看 post:create，改一篇已有的看 post:update。
           // 这里用「满足其一」是因为持有 `post:update_any` 的管理员
           // 即便没有 post:create 也应该能进编辑器改别人的文章——
@@ -103,6 +112,17 @@ export const router = createBrowserRouter([
           {
             element: <RequirePermission permission={PERMISSION.USER_LIST} />,
             children: [{ path: 'admin/users', element: <UserManagementPage /> }],
+          },
+
+          // 标签管理挂 `tag:manage`，与后端的路由守卫**逐个接口对齐**：
+          //   POST /tags、PATCH /tags/{id}/status、DELETE /tags/{id} 三条都挂着它。
+          //   也就是说「能到达这一页」和「能做这里的每个动作」是同一个条件，
+          //   不会出现"进来了但按钮点不动"的中间态。
+          //   页面里 `useTagsQuery(..., { enabled: managesTags })` 用的是同一个
+          //   判断——守卫、请求、按钮显隐三者必须同源，否则空窗期一定有人看见错的东西。
+          {
+            element: <RequirePermission permission={PERMISSION.TAG_MANAGE} />,
+            children: [{ path: 'admin/tags', element: <TagManagementPage /> }],
           },
         ],
       },

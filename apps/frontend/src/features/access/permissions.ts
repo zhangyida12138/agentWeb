@@ -41,6 +41,15 @@ export const PERMISSION = {
   COMMENT_DELETE: 'comment:delete',
   COMMENT_DELETE_ANY: 'comment:delete_any',
   LIKE_TOGGLE: 'like:toggle',
+  // ── 标签（M6） ──
+  // **只有入场券，没有免检牌**，这是标签与文章/评论最大的结构差别：
+  //   `tag:manage` 是「能不能碰术语表本身」——新建、下架、删除、改任何 user 标签。
+  //   而「改自己的标签」**没有对应的权限点**，因为它的依据不是权限而是归属：
+  //   一个登录用户对自己的标签天然有这份能力（后端 `Tag.ensure_manageable_by`）。
+  // 所以前端判断一行能不能编辑，也是两步：
+  //   ① 登录了吗（归属判断的前提）；② `tag:manage` 或 `author_id === 我`。
+  // 详见 features/tag/permissions.ts，两者的对应关系必须保持一致。
+  TAG_MANAGE: 'tag:manage',
 } as const
 
 export type PermissionCode = (typeof PERMISSION)[keyof typeof PERMISSION]

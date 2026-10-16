@@ -197,8 +197,13 @@ apps/backend/src/app/
 │   ├── blog/
 │   │   ├── entities.py                  #   Post 聚合根 + PostStatus 状态机 + ensure_owned_by
 │   │   ├── value_objects.py             #   PostTitle / PostContent / Slug / TagName / Summary
-│   │   ├── repositories.py              #   PostRepository + TagRepository 接口
+│   │   ├── repositories.py              #   PostRepository 接口
 │   │   └── exceptions.py                #   40030~40430（本文件 docstring 里有全局错误码分配表）
+│   ├── tag/
+│   │   ├── entities.py                  #   Tag 聚合根 + TagStatus/TagType + ensure_manageable_by
+│   │   ├── value_objects.py             #   TagDescription + 从 blog 复出的 TagName（单向共享内核）
+│   │   ├── repositories.py              #   TagRepository 接口（7 个方法）
+│   │   └── exceptions.py                #   40050 / 40051 / 40350 / 40450 / 40950
 │   └── interaction/
 │       ├── entities.py                  #   Comment 聚合根（任意深度；无 Like 实体，见 §7.5.2）
 │       ├── value_objects.py             #   CommentContent / LikeTargetType
@@ -215,6 +220,9 @@ apps/backend/src/app/
 │   ├── blog/
 │   │   ├── use_cases.py                 #   建/改/发/下架/删/读/列表（含「我的文章」）
 │   │   └── dto.py                       #   *Command / PostDTO / PostSummaryDTO
+│   ├── tag/
+│   │   ├── use_cases.py                 #   列表/建/改/改状态/软删（post_count 由仓库 JOIN 算出）
+│   │   └── dto.py                       #   *Command / *Query / TagDTO / TagPageDTO
 │   └── interaction/
 │       ├── use_cases.py                 #   评论树组装（递归）/发表/撤回/点赞/互动统计
 │       └── dto.py                       #   *Command / CommentNodeDTO / InteractionStatsDTO
@@ -227,13 +235,16 @@ apps/backend/src/app/
 │       │   ├── __init__.py              #   ★ 模型登记处（漏登记 → 迁移静默漏表）
 │       │   ├── user.py / role.py / permission.py
 │       │   ├── user_role.py / role_permission.py    # 联合主键，故意继承裸 Base
-│       │   ├── post.py / tag.py / post_tag.py        # blog
+│       │   ├── post.py / post_tag.py                 # blog
+│       │   ├── tag.py                                # tag
 │       │   └── comment.py / like.py                  # interaction
 │       ├── mappers/
 │       │   ├── user.py / access.py / post.py         # to_model / apply_to_model / to_entity
-│       │   └── comment.py                            # ★ content 两端都必须用裸 str，不能包 VO
+│       │   ├── tag.py                                #   ★ 不从 mappers/__init__.py re-export（会盖掉 post）
+│       │   └── comment.py                            #   ★ content 两端都必须用裸 str，不能包 VO
 │       └── repositories/
 │           ├── user.py / access.py / post.py
+│           ├── tag.py                   #   SqlTagRepository（post_count 的 JOIN+GROUP BY 在这）
 │           └── interaction.py           #   SqlCommentRepository + SqlLikeRepository（递归 CTE 在这）
 │
 └── presentation/                        # ── 表现层 ──
@@ -247,10 +258,12 @@ apps/backend/src/app/
         │   ├── roles.py                 #   /roles
         │   ├── posts.py                 #   公开读 + 授权写；另有 me_router（/me/posts）
         │   ├── comments.py              #   /posts/{id}/comments + /comments/{id}（DELETE 204）
-        │   └── likes.py                 #   /likes/toggle + /posts/{id}/interactions
+        │   ├── likes.py                 #   /likes/toggle + /posts/{id}/interactions
+        │   └── tag.py                   #   /tags（公开读 + tag:manage 写 + 作者改自己的）
         └── schemas/
             ├── auth.py / access.py      #   RegisterRequest / UserResponse / RoleResponse ...
             ├── post.py                  #   CreatePostRequest / PostResponse / PostPageResponse
+            ├── tag.py                   #   CreateTagRequest / UpdateTagRequest / TagResponse
             └── comment.py / like.py     #   ★ CommentResponse.from_dto 必须逐字段对齐 DTO
 ```
 
@@ -662,13 +675,17 @@ access   ──依赖──▶ identity     （分配角色前要确认用户存
 
 | 角色 | 权限 |
 | --- | --- |
-| `admin` | `_ALL_PERMISSION_CODES`（全部 15 个） |
+| `admin` | `_ALL_PERMISSION_CODES`（全部 16 个） |
 | `author` | reader 的 4 个 + `post:create/update/publish/delete`（共 8 个） |
 | `reader` | `comment:create`、`comment:delete`、`like:toggle`、`agent:chat` |
 
 ★ 三个 `*_any` 权限码（`post:update_any` / `post:delete_any` / `comment:delete_any`）**只有 admin 持有**，
 `author` 刻意不给——它们不是「更强一点的编辑权」，而是「跨过归属检查的钥匙」，见下文。
 `comment:delete` 则是读者的**入场券**而不是特权：没有它，读者发出去的评论永远删不掉。
+
+★ `tag:manage`（管理标签：新建 / 下架 / 删除）同样**只有 admin 持有**，而且它在守卫里是
+**唯一一个不需要返回权限快照就能表达边界的写权限**——因为「标签是公共词汇表」这件事
+本身就是全局的，见 §7.6。
 
 改这里 = 改种子数据（下次启动生效），`require_permission` 引用的也是同一批 `PermissionCode` 常量。
 
@@ -752,6 +769,60 @@ RBAC 只能回答「这个角色有没有 `post:update`」，回答不了「这�
 - **无冗余计数字段。** `comment_count` / `like_count` 一律实时聚合（`count_many` / `count_by_posts`）。
   软删除的评论与点赞是两张表，冗余列要靠跨表事务保证一致（撤回后计数还得跟着减），
   一致性成本远大于一次 `COUNT`。
+
+---
+
+## 7.6 `tag`：行级归属与「共享内核」
+
+标签原本只是 `blog` 里的一张表（随文章提交、自动创建）。当它长出自己的生命周期
+（下架、删除、独立管理）之后，它就成了**第五个上下文**。
+
+**① 单向共享内核，而不是双份实现。**
+`domain/tag/value_objects.py` 只做一次 re-export：
+
+```python
+tag ↦ blog   （TagName / TAG_NAME_MAX_LEN / TAG_SLUG_MAX_LEN）
+blog ↦ tag   （不存在）
+```
+
+为什么不能各写一份：两份 `TagName` 就是两个长度上限（历史上真的出现过 15/15 与 50/50 并存），
+而「同一个名字在两处归化成不同 slug」这种 bug 在集成测试里只表现为随机 409。
+依赖方向必须是单向的，且只共享**值对象**，不互相借仓储、实体、用例。
+
+**② 行级归属不能靠权限码，所以守卫分了两级。**
+`PUT /tags/{id}` **没有** `require_permission` 守卫，只靠认证；归属由
+`Tag.ensure_manageable_by(actor_id, actor_can_manage_any=...)` 判，并把三种情况分开：
+
+| 情况 | 结果 | 理由 |
+| --- | --- | --- |
+| 系统内置标签（`type=system`）且非管理员 | 40051 | 它**谁都不能改**，不是「别人的」——报 40350 会让人去找不存在的物主 |
+| 别人的标签 | 40350 | 是「不是你的」；两个码对应两种完全不同的用户行为 |
+| `author_id IS NULL`（作者已注销） | 40350 | 没主人≠人人可改，只剩管理员能动 |
+| 自己的 / 持有 `tag:manage` | 通过 | —— |
+
+而 `POST` / `PATCH /status` / `DELETE` 是**全局**操作（改的是一份公共词汇表，删一个标签会让
+所有用过它的文章一起变样），所以它们用普通的 `require_permission(TAG_MANAGE)`。
+**同一个聚合上两条写路径、两套授权**不是不一致，而是「破坏半径」不同。
+唯一的越权位 `actor_can_manage_any` 由 `PermissionCodes`（`frozenset[str]`）算出，
+**绝不让客户端用一个字段自称管理员**。
+
+**③ `post_count` 是派生值，不是列。**
+标签列表按「被引用次数」排序，这个数字由 `LEFT JOIN post_tags` + `LEFT JOIN posts` +
+`GROUP BY tags.id` 算出。**两个统计条件（`status='published'`、`deleted_at IS NULL`）必须写在
+JOIN 的 `ON` 里**——挪到 `WHERE` 会把外连接降级成内连接，「只被草稿引用的标签」会从列表里直接**消失**
+（而它正是作者回头要找的东西）。同理 `count_tags` 必须另起一条 `select(func.count()).select_from(子查询)`：
+直接复用带 `GROUP BY` 的语句来 count，`total` 会数成「标签 × 文章」的行数。
+
+**④ 软删除的语义按聚合自身定义，不强行统一。**
+`DELETE /tags/{id}` 是**幂等**的（重复删同样 204），而 `DELETE /comments/{id}` 第二次给 40440。
+两者都对：评论的不变量是「已撤回的评论对所有入口等同不存在」，而标签的删除是「收进回收站」，
+重复按一下不该报错。把两条线强行统一才是错的。
+
+**⑤ 唯一索引不认 `status`。**
+软删除的标签名字与 slug **仍被占用**（删了再建同名 → 40950）。这是数据库的事实、代码里一个字都看不到，
+所以只能靠集成测试锁住。推论：`exists_name` / `exists_slug` **故意不过滤 status**，
+而改名查重必须 `exclude_id` 排除自己——否则「`x.js` → `x js`」（两者归化成同一个 slug）
+会被自己挡下，用户明明只是加了个空格。
 
 ---
 

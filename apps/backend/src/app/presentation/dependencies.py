@@ -59,6 +59,13 @@ from app.application.interaction.use_cases import (
     ListCommentsUseCase,
     ToggleLikeUseCase,
 )
+from app.application.tag.use_cases import (
+    ChangeTagStatusUseCase,
+    CreateTagUseCase,
+    DeleteTagUseCase,
+    ListTagsUseCase,
+    UpdateTagUseCase,
+)
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.exceptions import InternalServerError
@@ -69,12 +76,14 @@ from app.domain.identity.entities import User
 from app.domain.identity.exceptions import TokenInvalidError
 from app.domain.identity.repositories import UserRepository
 from app.domain.interaction.repositories import CommentRepository, LikeRepository
+from app.domain.tag.repositories import TagRepository
 from app.infrastructure.persistence.repositories.access import SqlAccessRepository
 from app.infrastructure.persistence.repositories.interaction import (
     SqlCommentRepository,
     SqlLikeRepository,
 )
 from app.infrastructure.persistence.repositories.post import SqlPostRepository
+from app.infrastructure.persistence.repositories.tag import SqlTagRepository
 from app.infrastructure.persistence.repositories.user import SqlUserRepository
 
 # ──────────────────────────── 配置 ────────────────────────────
@@ -146,6 +155,20 @@ async def get_like_repository(
     然后点赞」必须在一个事务里，否则目标可能在两步之间被删掉。
     """
     return SqlLikeRepository(db)
+
+
+async def get_tag_repository(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TagRepository:
+    """标签仓储（对外只暴露接口类型）。
+
+    它与文章仓储共用同一个 session，这一点在标签上下文里比别处更关键：
+        ``SqlTagRepository.add`` 落库的新标签，其名字有可能刚刚被
+        ``SqlPostRepository`` 在同一事务里创建过（作者在文章里打了同一个新标签）。
+        两个仓储看到的是同一份事务快照，所以 ``exists_name`` 的结果与flush 后的
+        实际状态一致；如果它们各自开一个 session，就会出现「查不到 → 插入 → 唯一冲突」。
+    """
+    return SqlTagRepository(db)
 
 
 # ──────────────────────────── 用例工厂 ────────────────────────────
@@ -353,6 +376,44 @@ async def get_toggle_like_use_case(
     return ToggleLikeUseCase(posts, comments, likes)
 
 
+# ──────────────────── 标签上下文的用例工厂 ────────────────────
+
+# 五个用例都只需要一个仓储，所以下面每一条都是一行。
+# 不合并成一个「返回所有用例」的工厂：依赖注入的粒度应当与使用的粒度一致——
+# 某天列表查询要加缓存，只需要改 ``get_list_tags_use_case``，
+# 其余四条路由的依赖图完全不受影响。
+
+
+async def get_list_tags_use_case(
+    tags: Annotated[TagRepository, Depends(get_tag_repository)],
+) -> ListTagsUseCase:
+    return ListTagsUseCase(tags)
+
+
+async def get_create_tag_use_case(
+    tags: Annotated[TagRepository, Depends(get_tag_repository)],
+) -> CreateTagUseCase:
+    return CreateTagUseCase(tags)
+
+
+async def get_update_tag_use_case(
+    tags: Annotated[TagRepository, Depends(get_tag_repository)],
+) -> UpdateTagUseCase:
+    return UpdateTagUseCase(tags)
+
+
+async def get_change_tag_status_use_case(
+    tags: Annotated[TagRepository, Depends(get_tag_repository)],
+) -> ChangeTagStatusUseCase:
+    return ChangeTagStatusUseCase(tags)
+
+
+async def get_delete_tag_use_case(
+    tags: Annotated[TagRepository, Depends(get_tag_repository)],
+) -> DeleteTagUseCase:
+    return DeleteTagUseCase(tags)
+
+
 # ──────────────────────────── 认证守卫 ────────────────────────────
 
 # auto_error=False：默认行为是缺 header 时抛 HTTPException(403)，
@@ -486,6 +547,37 @@ async def get_optional_current_user(
 OptionalCurrentUser = Annotated[User | None, Depends(get_optional_current_user)]
 
 
+async def get_current_permission_codes(
+    current_user: CurrentUser,
+    access: Annotated[AccessRepository, Depends(get_access_repository)],
+) -> frozenset[str]:
+    """返回当前用户的全部权限码，**不要求**其中任何一个。
+
+    为什么需要它（而不是只有 ``require_permission``）：
+        有些接口的门槛不是权限码，而是「这一行是不是你的」。
+        编辑标签就是这种：任何登录用户都可以改自己创建的标签，
+        所以不能挂一个权限码守卫（挂上去作者就进不来了）。
+        但同一个接口又要让管理员能改**任何**标签，
+        于是它仍然需要知道「调用者手里有没有管理员那把钥匙」。
+
+        换句话说：这里的权限码不是**门票**，而是**钥匙**。
+        门票是二元的（有/没有），钥匙要交给调用方自己判断能开哪扇门。
+        ``require_permission`` 负责门票，这个依赖负责钥匙。
+
+    返回 ``frozenset`` 而不是 list：权限码集合只会被用来做 ``in`` 判断，
+    不可变 + 去重正是它的语义，顺便避免调用方（或下游）就地改掉它。
+    """
+    user_id = current_user.id
+    if user_id is None:  # pragma: no cover - 守卫出来的实体必然来自仓储，id 不会为空
+        raise TokenInvalidError()
+    return frozenset(await access.get_permission_codes(user_id))
+
+
+# 需要自己判断权限时的标注糖：`codes: PermissionCodes`。
+# 用它就意味着「授权判断在函数体里」，所以配套的注释必须写清楚判的是哪一条规则。
+PermissionCodes = Annotated[frozenset[str], Depends(get_current_permission_codes)]
+
+
 def require_permission(code: str) -> Callable[..., Awaitable[User]]:
     """生成「要求当前用户拥有 ``code`` 权限」的依赖。
 
@@ -574,32 +666,47 @@ __all__ = [
     "CurrentUser",
     "CurrentUserId",
     "OptionalCurrentUser",
+    "PermissionCodes",
     "get_access_repository",
     "get_assign_roles_use_case",
     "get_change_password_use_case",
+    "get_change_tag_status_use_case",
+    "get_comment_repository",
+    "get_create_comment_use_case",
     "get_create_post_use_case",
+    "get_create_tag_use_case",
+    "get_current_permission_codes",
     "get_current_user",
     "get_current_user_id",
     "get_current_user_use_case",
+    "get_delete_comment_use_case",
     "get_delete_post_use_case",
+    "get_delete_tag_use_case",
+    "get_like_repository",
+    "get_list_comments_use_case",
     "get_list_my_posts_use_case",
     "get_list_permissions_use_case",
     "get_list_published_posts_use_case",
     "get_list_roles_use_case",
+    "get_list_tags_use_case",
     "get_list_user_roles_use_case",
     "get_list_users_use_case",
     "get_login_use_case",
     "get_my_access_use_case",
     "get_optional_current_user",
     "get_post_by_slug_use_case",
+    "get_post_interaction_stats_use_case",
     "get_post_repository",
     "get_publish_post_use_case",
     "get_register_use_case",
     "get_reset_user_password_use_case",
+    "get_tag_repository",
+    "get_toggle_like_use_case",
     "get_token_config",
     "get_unpublish_post_use_case",
     "get_update_post_use_case",
     "get_update_profile_use_case",
+    "get_update_tag_use_case",
     "get_user_repository",
     "require_permission",
     "require_permission_with_codes",

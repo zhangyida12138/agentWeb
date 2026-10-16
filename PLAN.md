@@ -50,7 +50,8 @@ apps/backend/src/app/
 | --- | --- | --- |
 | `identity` | 用户与认证 | User、Credential、Email |
 | `access` | 权限 | Role、Permission、UserRole |
-| `blog` | 文章 | Post、Tag、PostStatus |
+| `blog` | 文章 | Post、PostStatus |
+| `tag` | 标签 | Tag、TagStatus、TagType |
 | `interaction` | 互动 | Comment、Like |
 | `agent` | AI 助手 | Conversation、Message |
 

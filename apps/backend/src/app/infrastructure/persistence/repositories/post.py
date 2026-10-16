@@ -31,6 +31,7 @@ from app.domain.blog.exceptions import (
     SlugAlreadyTakenError,
 )
 from app.domain.blog.repositories import PostRepository
+from app.domain.tag.entities import TagStatus, TagType
 from app.infrastructure.persistence.mappers.post import (
     apply_to_model,
     to_entity,
@@ -71,8 +72,16 @@ def _raise_translated(exc: IntegrityError) -> NoReturn:
 class SqlPostRepository(PostRepository):
     """基于 ``AsyncSession`` 的文章仓储。
 
-    ``tags`` 的读写都在这里完成，因为它属于 ``Post`` 这个聚合——
-    没有独立于文章的生命周期，也就没有理由单独开一个仓储去增删它。
+    为什么标签的**关联**也在这里完成（而不是甩给 ``SqlTagRepository``）：
+        ``post_tags`` 是文章聚合的一部分——它的生命周期完全由文章决定
+        （文章改标签 = 整体替换关联集合），单看它没有"增删一个关联"这种独立需求。
+        把它拆到 tag 仓储去，只会让「保存文章」变成跨两个仓储的两步操作，
+        而这两步必须在同一个事务里成对成功。
+
+    ⚠️ 但标签**本身**（``tags`` 表的内容：名字、描述、状态、归属）已经独立了，
+       见 ``SqlTagRepository``。
+       这里的 ``_resolve_tag_ids`` 只做一件事：为文章写路径**按需创建**还不存在的标签。
+       它不是标签的"增删改"入口，两者不要混。
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -90,7 +99,7 @@ class SqlPostRepository(PostRepository):
         except IntegrityError as exc:
             _raise_translated(exc)
 
-        tag_names = await self._sync_tags(model.id, post.tags)
+        tag_names = await self._sync_tags(model.id, post.tags, post.author_id)
         return to_entity(model, tags=tag_names)
 
     async def update(self, post: Post) -> Post:
@@ -106,7 +115,7 @@ class SqlPostRepository(PostRepository):
         except IntegrityError as exc:
             _raise_translated(exc)
 
-        tag_names = await self._sync_tags(model.id, post.tags)
+        tag_names = await self._sync_tags(model.id, post.tags, post.author_id)
         # updated_at 由 Column 的 onupdate 在 UPDATE 语句里刷新，
         # 而 ORM 会在 flush 后把新值回填到 model 上（synchronize_session 的默认行为），
         # 所以这里读到的已经是库里的新时间戳，不必再查一次
@@ -192,11 +201,22 @@ class SqlPostRepository(PostRepository):
     # ────────────── 计数 ──────────────
 
     async def increment_view_count(self, post_id: uuid.UUID) -> int:
-        """浏览量 +1 并返回自增后的值（数据库侧原子自增）。"""
+        """浏览量 +1 并返回自增后的值（数据库侧原子自增）。
+
+        ⚠️ ``updated_at=PostModel.updated_at`` 这行看着多余，其实是**必须**的：
+        ``TimestampMixin.updated_at`` 上声明了 ``onupdate=_utc_now``，凡是 Core 层
+        ``update()`` 没有显式列出该列的语句，SQLAlchemy 都会自动补上 ``updated_at=now()``。
+        而「被读了一次」不算「内容被改过」——一旦这里放开，任何一次详情页访问都会把
+        ``updated_at`` 推到当前时间，文章列表按更新时间排序、以及以 ``updated_at`` 为键的
+        缓存/增量同步全部失真。显式写回自身值是关掉 ``onupdate`` 的标准做法。
+        """
         stmt = (
             update(PostModel)
             .where(PostModel.id == post_id)
-            .values(view_count=PostModel.view_count + 1)
+            .values(
+                view_count=PostModel.view_count + 1,
+                updated_at=PostModel.updated_at,
+            )
             .returning(PostModel.view_count)
         )
         return (await self._session.execute(stmt)).scalar_one()
@@ -223,7 +243,10 @@ class SqlPostRepository(PostRepository):
         return (
             stmt.join(PostTagModel, PostTagModel.post_id == PostModel.id)
             .join(TagModel, TagModel.id == PostTagModel.tag_id)
-            .where(TagModel.slug == tag.slug)
+            # 已删除的标签不再粘在文章上：按 ``?tag=python`` 筛选时，
+            # 如果这个标签已被下架，结果应该是**空**，而不是"还是能筛出来"——
+            # 后者意味着删标签这件事对读者完全无效。
+            .where(TagModel.slug == tag.slug, TagModel.status != TagStatus.DELETED)
         )
 
     def _author_query(self, author_id: uuid.UUID, status: str | None) -> Select[tuple[PostModel]]:
@@ -262,13 +285,22 @@ class SqlPostRepository(PostRepository):
             ``post_tags`` 里没有顺序列，因为「标签顺序」在本期不是产品需求。
             与其让顺序取决于数据库的返回顺序（不确定），不如显式规定一个确定顺序——
             否则前端每次刷新看到的标签次序都可能不一样，看起来像在闪。
+
+        ⚠️ 过滤 ``status != deleted``：标签被删除后不该继续粘在文章上。
+           注意只排除 ``deleted``、不排除 ``abnormal``：
+            ``abnormal`` 的语义是「停止新的使用，但历史文章不动」，
+            （见 ``domain/tag/entities.py::TagStatus``），
+           所以打上它的文章仍然要看到这个标签——否则作者会以为自己丢了一个标签。
         """
         if not post_ids:
             return {}
         stmt = (
             select(PostTagModel.post_id, TagModel.name)
             .join(TagModel, TagModel.id == PostTagModel.tag_id)
-            .where(PostTagModel.post_id.in_(post_ids))
+            .where(
+                PostTagModel.post_id.in_(post_ids),
+                TagModel.status != TagStatus.DELETED,
+            )
             .order_by(TagModel.name.asc())
         )
         rows = (await self._session.execute(stmt)).all()
@@ -279,30 +311,43 @@ class SqlPostRepository(PostRepository):
 
     # ────────────── 内部：写入标签关联 ──────────────
 
-    async def _sync_tags(self, post_id: uuid.UUID, tags: tuple[TagName, ...]) -> list[str]:
+    async def _sync_tags(
+        self, post_id: uuid.UUID, tags: tuple[TagName, ...], author_id: uuid.UUID
+    ) -> list[str]:
         """把文章的标签关联整体对齐到 ``tags``，返回最终生效的标签名。
 
         「先全删再全插」而不是「算出差集再增删」：
             一篇文章最多 10 个标签，删除+插入的代价可以忽略，
             而差集算法要处理「同一次提交里既有新增又有删除」的各种组合。
             在事务里做，出错会一起回滚，不存在「删了但没插上」的中间态。
+
+        ``author_id`` 传下只是为了「按需创建新标签」时记录归属，
+        对已有标签没有影响——详见 ``_resolve_tag_ids``。
         """
         await self._session.execute(delete(PostTagModel).where(PostTagModel.post_id == post_id))
         if not tags:
             return []
 
-        tag_ids = await self._resolve_tag_ids(tags)
+        tag_ids = await self._resolve_tag_ids(tags, author_id)
         self._session.add_all([PostTagModel(post_id=post_id, tag_id=tag_id) for tag_id in tag_ids])
         await self._session.flush()
         return sorted(str(tag) for tag in tags)
 
-    async def _resolve_tag_ids(self, tags: Sequence[TagName]) -> list[uuid.UUID]:
+    async def _resolve_tag_ids(
+        self, tags: Sequence[TagName], author_id: uuid.UUID
+    ) -> list[uuid.UUID]:
         """按名字取标签 id，不存在的**按需创建**。
 
         并发安全靠 ``ON CONFLICT DO NOTHING`` 而不是「先查再插」：
             后者在两个人同时第一次使用同一个新标签时会双写，
             一方撞唯一索引后整个请求失败（而用户的感受是「保存标签偶尔会失败」）。
             ``ON CONFLICT DO NOTHING`` 让「另一个请求抢先插了」变成一个可吞掉的事件。
+
+        归属的规则很直接：**谁先把标签敲进文章，标签就归谁**。
+            冲突发生时（另一个请求抢先插了），``DO NOTHING`` 意味着什么都不写，
+            包括 ``author_id``——于是后到的作者用了别人的标签，但没夺走它。
+            这是刻意的：改归属需要的是明确的「转让」动作，
+            而不是「我恰好也用了这个词」。
         """
         names = [str(tag) for tag in tags]
         id_by_name = await self._select_tag_ids(names)
@@ -313,17 +358,35 @@ class SqlPostRepository(PostRepository):
         # 显式传 id 而不是依赖列的 insert_default：
         #   TagModel.id 走的是 Column 级 insert_default，而 Core 的多行 VALUES INSERT
         #   是否渲染 Python 侧默认值取决于方言/版本，显式传更稳，也不影响正确性。
-        #   （标签没有领域实体，id 就在这一层生成。）
+        #
+        # status / type 同理显式传——它们在 TagModel 上**没有**构造器默认值，
+        #   就是为了强制每一个写入方说出「这个标签什么状态、给谁用」。
+        #   ⚠️ 写路径建出来的标签**永远是 user 类型**：
+        #      在编辑器里敲一个新标签，不应该是「创建一个平台内置标签」的快捷方式。
+        #      system 只能通过标签管理接口由管理员显式创建。
+        #      否则作者只要在文章里打上「首页推荐」，就能造出一个管理员才该拥有的东西。
         await self._session.execute(
             pg_insert(TagModel)
-            .values([{"id": uuid.uuid4(), "name": str(tag), "slug": tag.slug} for tag in missing])
+            .values(
+                [
+                    {
+                        "id": uuid.uuid4(),
+                        "name": str(tag),
+                        "slug": tag.slug,
+                        "status": TagStatus.NORMAL,
+                        "type": TagType.USER,
+                        "author_id": author_id,
+                    }
+                    for tag in missing
+                ]
+            )
             .on_conflict_do_nothing()
         )
         id_by_name = await self._select_tag_ids(names)
 
         # 仍然查不到的，只可能是 slug 唯一索引被别人占了：
         #   slug 由 name 确定性派生，所以「不同名字派生出同一 slug」才会走到这里
-        #   （例如 ``C#`` 与 ``C++`` 都归化成 ``c``）。
+        #   （例如 ``Node.js`` 与 ``Node js`` 都归化成 ``node-js``）。
         #   这时**明确报错**而不是静默丢弃——静默丢弃会让用户以为标签存上了。
         unfound = [name for name in names if name not in id_by_name]
         if unfound:
